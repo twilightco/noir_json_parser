@@ -2,8 +2,8 @@ use crate::_comparison_tools::bounds_checker::get_validity_flags;
 use crate::enums::CaptureMode::{CAPTURE_TABLE_HALF, GRAMMAR_CAPTURE};
 use crate::enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 use crate::enums::Token::{
-    BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, KEY_SEPARATOR_TOKEN, KEY_TOKEN, LITERAL_TOKEN,
-    NUM_TOKENS, NUMERIC_TOKEN, STRING_TOKEN,
+    BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, END_ARRAY_TOKEN, END_OBJECT_TOKEN,
+    KEY_SEPARATOR_TOKEN, KEY_TOKEN, LITERAL_TOKEN, NUM_TOKENS, NUMERIC_TOKEN, STRING_TOKEN,
 };
 use crate::get_literal::JSONLiteral;
 use crate::json_entry::{JSONContextStackEntry, JSONEntry, JSONEntryPacked};
@@ -34,6 +34,13 @@ impl<let MaxLength: u32> JSONValue<MaxLength> {
     }
     pub fn is_literal(self) -> bool {
         self.value_type == LITERAL_TOKEN as Field
+    }
+    /// containers are recorded under their *closing* token
+    pub fn is_object(self) -> bool {
+        self.value_type == END_OBJECT_TOKEN as Field
+    }
+    pub fn is_array(self) -> bool {
+        self.value_type == END_ARRAY_TOKEN as Field
     }
 }
 
@@ -1348,17 +1355,50 @@ fn number_accepts_a_decimal_inside_an_array() {
     assert(inner.get_length() == 2);
 }
 
-/// The original implementation quirk, unrelated to the parser but in the way of reading decimals out
-/// of an array: `get_value_from_array` asserts `STRING_TOKEN` (get_string.nr:308)
-/// while `get_value` asserts nothing. So the raw bytes of a *number* inside an
-/// array cannot be read at all -- `get_number_from_array` is the only door, and
-/// it rejects decimals. F4 has to descend with `get_object_from_array` or
-/// widen this getter.
-#[test(should_fail_with = "get_array_element_as_string: entry exists but is not a string!")]
-fn number_array_element_raw_bytes_are_unreachable_for_numbers() {
+/// `get_value_from_array` used to assert `STRING_TOKEN`, mirroring the string getter,
+/// while its object counterpart `get_value` asserts nothing. That made the raw bytes of
+/// a *number* inside an array unreachable: `get_number_from_array` was the only door and
+/// it rejects decimals. The getter now returns the entry whatever its type, with
+/// `value_type` telling the caller what it got -- exactly like `get_value`.
+#[test]
+fn number_array_element_raw_bytes_are_readable() {
     let json: NumberJson = JSON::parse_json_from_string("{\"a\":[-1.5,0.5]}");
     let inner = json.get_array_unchecked("a".as_bytes());
-    let _: JSONValue<16> = inner.get_value_from_array_unchecked(0);
+
+    let first: JSONValue<16> = inner.get_value_from_array_unchecked(0);
+    assert(first.is_number());
+    assert(first.value.storage()[0] == "-".as_bytes()[0]);
+    assert_eq(first.value.len(), 4);
+
+    let second: JSONValue<16> = inner.get_value_from_array_unchecked(1);
+    assert(second.is_number());
+    assert_eq(second.value.len(), 3);
+}
+
+/// Literals and nested containers come back through the same door.
+#[test]
+fn array_element_values_carry_their_type() {
+    let json: JSON<64, 6, 24, 13, 2> =
+        JSON::parse_json_from_string("{\"a\":[true,\"s\",{\"b\":1}]}");
+    let inner = json.get_array_unchecked("a".as_bytes());
+
+    let literal: JSONValue<16> = inner.get_value_from_array_unchecked(0);
+    assert(literal.is_literal());
+
+    let string: JSONValue<16> = inner.get_value_from_array_unchecked(1);
+    assert(string.is_string());
+
+    let object: JSONValue<16> = inner.get_value_from_array_unchecked(2);
+    assert(object.is_object());
+}
+
+/// The *string* getters keep their type assertion: they unescape, which only makes
+/// sense for strings.
+#[test(should_fail_with = "get_array_element_as_string: entry exists but is not a string!")]
+fn number_array_element_is_still_not_a_string() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":[-1.5,0.5]}");
+    let inner = json.get_array_unchecked("a".as_bytes());
+    let _: BoundedVec<u8, 16> = inner.get_string_from_array(0).unwrap();
 }
 
 #[test]

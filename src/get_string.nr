@@ -301,13 +301,6 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         array_index: Field,
     ) -> Option<JSONValue<StringBytes>> {
         let (entry, valid, _) = self.get_entry_from_array(array_index);
-        if valid {
-            assert_eq(
-                entry.entry_type,
-                STRING_TOKEN as Field,
-                "get_array_element_as_string: entry exists but is not a string!",
-            );
-        }
 
         let parsed_string: [u8; StringBytes] = self.extract_string_entry(entry);
 
