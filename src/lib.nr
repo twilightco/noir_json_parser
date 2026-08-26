@@ -21,10 +21,10 @@ mod benchmarks;
 use json::JSON;
 
 // Re-export public API types whose implementation modules remain private.
+pub use enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 pub use get_literal::JSONLiteral;
 pub use getters::KeyHashable;
 pub use json::{JSON as JSONGeneric, JSONValue};
-pub use enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 
 pub type JSON512b = JSON<512, 20, 64, 33, 2>;
 pub type JSON1kb = JSON<1024, 37, 128, 65, 2>;
@@ -32,4 +32,5 @@ pub type JSON2kb = JSON<2048, 70, 256, 129, 2>;
 pub type JSON4kb = JSON<4096, 136, 512, 257, 2>;
 pub type JSON8kb = JSON<8192, 268, 1024, 513, 2>;
 pub type JSON16kb = JSON<16384, 532, 2048, 1025, 2>;
+mod mutations;
 mod soundness_fix;

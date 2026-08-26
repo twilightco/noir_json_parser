@@ -97,11 +97,9 @@ impl JSONEntry {
     unconstrained fn __split_child_pointer_from_field(f: Field) -> (Field, Field, Field) {
         let entry = JSONEntry::from_field(f);
         let child_pointer = entry.child_pointer;
-        let lo = entry.id
-            + entry.parent_index * 0x10000
-            + entry.array_pointer * 0x10000000000000000;
-        let hi = (f - lo - child_pointer * 0x100000000000000000000)
-            / 0x1000000000000000000000000;
+        let lo =
+            entry.id + entry.parent_index * 0x10000 + entry.array_pointer * 0x10000000000000000;
+        let hi = (f - lo - child_pointer * 0x100000000000000000000) / 0x1000000000000000000000000;
         (lo, child_pointer, hi)
     }
 

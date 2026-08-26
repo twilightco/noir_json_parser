@@ -98,11 +98,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
                 "container identity exceeds MaxNumValues",
             );
             // NOTE THIS RELIES ON MaxNumValues ACTUALLY DESCRIBING NUMMaxNumValues + 1
-            let index = if update {
-                identity
-            } else {
-                MaxNumValues - 1
-            };
+            let index = if update { identity } else { MaxNumValues - 1 };
             assert(
                 identity_seen[index] * update as Field == 0,
                 "container identities must be unique",
@@ -164,8 +160,8 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         let mut root_count: Field = 0;
         for i in 0..MaxNumValues {
             let candidate: JSONEntry = self.json_entries_packed[i].into();
-            root_count += ((candidate.parent_index == 0)
-                & (self.json_entries_packed[i].value != 0)) as Field;
+            root_count +=
+                ((candidate.parent_index == 0) & (self.json_entries_packed[i].value != 0)) as Field;
         }
         assert(root_count == 1, "JSON must contain exactly one root entry");
         self.root_index_in_transcript = root_index;
