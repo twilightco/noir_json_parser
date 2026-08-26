@@ -1074,6 +1074,66 @@ fn test_parse_json() {
     assert(result.is_some() == false);
 }
 
+// ---------------------------------------------------------------------------
+// multi-segment paths
+// ---------------------------------------------------------------------------
+//
+// `get_string_from_path` / `get_value_from_path` walked every intermediate segment
+// against `self` instead of against the object the previous segment resolved to. At
+// depth 2 the two are the same thing, which is why it went unnoticed; from depth 3 on,
+// every segment but the last was looked up in the root, so a genuinely nested path did
+// not resolve at all.
+
+type PathJson = JSON<96, 7, 32, 17, 2>;
+
+fn nested_path_document() -> PathJson {
+    JSON::parse_json_from_string("{\"a\":{\"b\":{\"c\":\"deep\"}},\"c\":\"shallow\"}")
+}
+
+#[test]
+fn path_of_three_segments_resolves_through_the_nesting() {
+    let json = nested_path_document();
+    let path: [BoundedVec<u8, 1>; 3] = [
+        BoundedVec::from_array("a".as_bytes()),
+        BoundedVec::from_array("b".as_bytes()),
+        BoundedVec::from_array("c".as_bytes()),
+    ];
+
+    let result: Option<BoundedVec<u8, 10>> = json.get_string_from_path(path);
+    assert(result.is_some());
+    let found = result.unwrap();
+    assert_eq(found.len(), 4);
+    assert_eq(found.storage()[0], "d".as_bytes()[0]);
+}
+
+#[test]
+fn path_of_three_segments_returns_the_value_getter_too() {
+    let json = nested_path_document();
+    let path: [BoundedVec<u8, 1>; 3] = [
+        BoundedVec::from_array("a".as_bytes()),
+        BoundedVec::from_array("b".as_bytes()),
+        BoundedVec::from_array("c".as_bytes()),
+    ];
+
+    let result: Option<JSONValue<10>> = json.get_value_from_path(path);
+    assert(result.is_some());
+    assert(result.unwrap().is_string());
+}
+
+/// `a.c` does not exist -- `c` only exists at the root and under `a.b`. Depth 2 was
+/// always right, but it is the case the walk must keep getting right.
+#[test]
+fn path_does_not_fall_back_to_the_root() {
+    let json = nested_path_document();
+    let path: [BoundedVec<u8, 1>; 2] = [
+        BoundedVec::from_array("a".as_bytes()),
+        BoundedVec::from_array("c".as_bytes()),
+    ];
+
+    let result: Option<BoundedVec<u8, 10>> = json.get_string_from_path(path);
+    assert(result.is_none());
+}
+
 #[test]
 fn test_literal() {
     let text = "{   \"name\": \"Adeel Solangi\", \"testA\": false, \"testB\": true, \"testC\": null }                                                                   ";

@@ -233,7 +233,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         let mut target = self;
         let mut valid = true;
         for i in 0..PathDepth - 1 {
-            let child = self.get_object(keys[i]);
+            let child = target.get_object(keys[i]);
 
             target = child.unwrap_unchecked();
             valid = valid & child.is_some();
@@ -335,7 +335,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         let mut target = self;
         let mut valid = true;
         for i in 0..PathDepth - 1 {
-            let child = self.get_object(keys[i]);
+            let child = target.get_object(keys[i]);
 
             target = child.unwrap_unchecked();
             valid = valid & child.is_some();
