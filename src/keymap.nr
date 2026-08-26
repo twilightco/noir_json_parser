@@ -79,6 +79,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         let mut parent_indices: [u32; MaxNumValues] = [0; MaxNumValues];
 
         let mut identity_to_json_map: [u32; MaxNumValues] = [0; MaxNumValues];
+        let mut identity_seen: [Field; MaxNumValues] = [0; MaxNumValues];
         for i in 0..MaxNumValues {
             // 11.75 + 3.5 = 15.25 gates per iteration
             let (id, parent_index, entry_type) = JSONEntry::extract_entry_type_id_and_parent_index_from_field(
@@ -88,12 +89,25 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             // 2 gates
             // update is 1 for end of object/array, 0 for other
             let update = TOKEN_ENDS_OBJECT_OR_ARRAY[cast_num_to_u32(entry_type)];
+            // A container identity indexes `identity_to_json_map`, whose last slot is
+            // reserved for "no container". A hint that puts a real container there
+            // would let it impersonate the reserved slot, so reject it.
+            let identity = cast_num_to_u32(id);
+            assert(
+                !update | (identity < MaxNumValues - 1),
+                "container identity exceeds MaxNumValues",
+            );
             // NOTE THIS RELIES ON MaxNumValues ACTUALLY DESCRIBING NUMMaxNumValues + 1
             let index = if update {
-                cast_num_to_u32(id)
+                identity
             } else {
                 MaxNumValues - 1
             };
+            assert(
+                identity_seen[index] * update as Field == 0,
+                "container identities must be unique",
+            );
+            identity_seen[index] = if update { 1 } else { identity_seen[index] };
             // 3.5 gates
             identity_to_json_map[index] = i;
         }
@@ -110,10 +124,15 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             // 3.5 gates
             let index_of_parent = identity_to_json_map[parent_identity_post];
             // 1 gate + 3.5 gates
-            let updated = JSONEntry::add_child_pointer_into_field(
-                sorted_entries[index_of_parent].value,
-                i as Field,
-            );
+            // Only the write that actually lands matters: on the discarded branch we
+            // feed an empty entry through, so `add_child_pointer_into_field` can
+            // reject a double write unconditionally.
+            let parent_value = if new_parent {
+                sorted_entries[index_of_parent].value
+            } else {
+                0
+            };
+            let updated = JSONEntry::add_child_pointer_into_field(parent_value, i as Field);
 
             // RELIES ON THE SMALLEST ENTRY IN THE SORTED LIST BEING EMPTY
             // 1 gate
@@ -142,6 +161,13 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         assert(packed_entry.value != 0);
         // checks that the parent index is 0
         assert(entry.parent_index == 0);
+        let mut root_count: Field = 0;
+        for i in 0..MaxNumValues {
+            let candidate: JSONEntry = self.json_entries_packed[i].into();
+            root_count += ((candidate.parent_index == 0)
+                & (self.json_entries_packed[i].value != 0)) as Field;
+        }
+        assert(root_count == 1, "JSON must contain exactly one root entry");
         self.root_index_in_transcript = root_index;
     }
 }

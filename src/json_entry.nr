@@ -94,7 +94,43 @@ impl JSONEntry {
         (low, mid, hi)
     }
 
+    unconstrained fn __split_child_pointer_from_field(f: Field) -> (Field, Field, Field) {
+        let entry = JSONEntry::from_field(f);
+        let child_pointer = entry.child_pointer;
+        let lo = entry.id
+            + entry.parent_index * 0x10000
+            + entry.array_pointer * 0x10000000000000000;
+        let hi = (f - lo - child_pointer * 0x100000000000000000000)
+            / 0x1000000000000000000000000;
+        (lo, child_pointer, hi)
+    }
+
+    /**
+     * @brief reads back the 2-byte child pointer of a packed entry
+     * @note ~10 gates, cheaper than a full `from_field`
+     **/
+    fn extract_child_pointer_from_field(f: Field) -> Field {
+        // Safety: the range checks and the recomposition below pin the decomposition:
+        // the three components sum to less than 2^168, so it is unique.
+        let (lo, child_pointer, hi) = unsafe { JSONEntry::__split_child_pointer_from_field(f) };
+        lo.assert_max_bit_size::<80>();
+        child_pointer.assert_max_bit_size::<16>();
+        hi.assert_max_bit_size::<72>();
+        assert(
+            lo + child_pointer * 0x100000000000000000000 + hi * 0x1000000000000000000000000 == f,
+        );
+        child_pointer
+    }
+
     pub(crate) fn add_child_pointer_into_field(f: Field, child_pointer: Field) -> Field {
+        child_pointer.assert_max_bit_size::<16>();
+        // Adding a second pointer into a slot that already holds one carries out of
+        // the 2-byte child pointer and silently corrupts `num_children`. Callers that
+        // do not want the write must pass `0` (see `keymap.nr`).
+        assert(
+            JSONEntry::extract_child_pointer_from_field(f) == 0,
+            "child pointer was already initialized",
+        );
         f + child_pointer * 0x100000000000000000000
     }
     unconstrained fn __extract_entry_type_and_id_from_field(f: Field) -> (Field, Field, Field) {
