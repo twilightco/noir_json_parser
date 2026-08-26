@@ -1,0 +1,2 @@
+subject=fix: constrain tokenizer terminal state
+reject=build_transcript: scan ended mid-token

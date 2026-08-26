@@ -1,0 +1,10 @@
+Claim `x > y` for two values one apart.
+
+`lte_field_240_bit` takes the comparison from an unconstrained hint and proves it with a
+single 240-bit range check on a selector. The selector's false branch used to evaluate to
+`x - y + 1`, which is *zero* when `y == x + 1` -- so the range check passed on a lie.
+`noir_sort` is handed this function as the comparator that orders `key_hashes`, and that
+ordering is the whole basis of the key lookup.
+
+The patch makes the hint claim `x > y` unconditionally, and exposes the gadget so a
+circuit can be built around it.

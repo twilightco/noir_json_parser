@@ -1,0 +1,9 @@
+A 63-byte key, one past the 62 that `MaxKeyFields = 2` can represent.
+
+The key hash is taken over exactly `MaxKeyFields` limbs of 31 bytes and the parse side
+bounded nothing, so the 63rd byte simply vanished. The document parses and every other
+key in it reads back normally, so nothing tells the caller that one of its keys is not
+the key it wrote -- and two keys agreeing on 62 bytes become one key.
+
+No lie anywhere: an honest prover, an honest witness, and a document the library should
+have refused. That is why this attack carries no patch.

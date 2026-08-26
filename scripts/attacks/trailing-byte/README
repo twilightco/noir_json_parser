@@ -1,0 +1,11 @@
+The buffer is exactly full -- `StringBytes == NumBytes`, which is how any caller that
+pads its own records calls `parse_json` -- and its last byte is a digit.
+
+A digit legally STARTS a number, so the scan stops inside one, in a perfectly legal small
+mode. No error state is ever produced. The only thing that noticed was an assert inside
+the unconstrained `__build_transcript`, and an assert in an unconstrained function is not
+a constraint: a prover who does not want it does not run it. The trailing byte is dropped
+and the record is accepted as valid JSON.
+
+The patch removes that assert, which is what "the hint is not a constraint" means in
+practice.

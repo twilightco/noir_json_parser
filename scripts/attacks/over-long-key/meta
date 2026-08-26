@@ -1,0 +1,2 @@
+subject=fix: accept keys of exactly MaxKeyFields * 31 bytes
+reject=key too large
