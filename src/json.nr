@@ -621,6 +621,33 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         // `cast_num_to_u32`; for the last byte nothing did. 1 gate closes it, and
         // it is the constraint the parser's mode encoding relies on.
         scan_mode.assert_max_bit_size::<3>();
+        // ...and the bound alone is not enough either. The range check
+        // says the mode is *small*; it does not say the scan *ended* in grammar mode.
+        // If the last byte of the buffer legally STARTS a token (a digit, `-`, `"`,
+        // `t`/`f`/`n`) the scan stops inside that token with a perfectly legal small
+        // mode, no error entry is ever produced, and nothing above notices. The original implementation
+        // does check this, but only inside the unconstrained `__build_transcript`,
+        // where a malicious prover simply does not run it -- so up to 3 trailing junk
+        // bytes could be dropped and the record still accepted as valid JSON
+        // (`length.assert_max_bit_size::<2>()` above is what caps it at 3).
+        //
+        // Findings R5/R6 of reports/SOUNDNESS-PROBE.md: R5 (an *illegal* trailing byte,
+        // via the missing range check on `ScanData::scan_token`) is closed by the line
+        // above; R6 (a *legal token-start* trailing byte) needs this one.
+        //
+        // Both need `StringBytes == NumBytes`. `parse_json` SPACE-pads a short input,
+        // and that padding terminates the junk byte and turns it into a real token, so
+        // the original implementation is accidentally safe whenever the caller passes a short string. Our
+        // adapter does not: it hands over a fixed `[u8; NumBytes]` buffer it has padded
+        // itself, i.e. `StringBytes == NumBytes` always, and the last byte of that
+        // buffer is prover-chosen. The accidental protection does not apply to us.
+        //
+        // 1 gate, once per parse. Message deliberately different from the brillig one
+        // in `__build_transcript`, which fires first on an honest run.
+        assert(
+            scan_mode == GRAMMAR_CAPTURE as Field,
+            "build_transcript: scan ended mid-token",
+        );
 
         JSON {
             json: self.json,

@@ -350,3 +350,50 @@ fn fix_get_object_on_an_array_is_rejected() {
     let json: Ent15 = JSON::parse_json_from_string("{\"entities\":[]}");
     let _ = json.get_object("entities".as_bytes()).unwrap();
 }
+
+// -------------------------------------------------------------------------------
+// R6: the scan must end in grammar mode (see json.nr, `build_transcript`)
+// -------------------------------------------------------------------------------
+//
+// A trailing byte that legally STARTS a token, in the last slot of an exact-size
+// buffer (`StringBytes == NumBytes`, which is how our adapter always calls
+// `parse_json`), used to be caught only by an assert inside the unconstrained
+// `__build_transcript` -- i.e. not caught at all against a malicious prover. The
+// mutation experiment is in reports/SOUNDNESS-PROBE.md esp. 11b; it cannot live here,
+// because it needs the brillig assert removed.
+//
+// These are `should_fail` without a message on purpose: on an honest run the brillig
+// assert still fires first, with its own wording, so pinning a message here would pin
+// the wrong guard. What they pin is that the record is rejected at all -- if someone
+// ever "simplifies" the check away, they go green and this catches it.
+
+/// Trailing digit: opens a number that never terminates.
+#[test(should_fail)]
+fn fix_r6_trailing_digit_rejected() {
+    let _: JSON<8, 4, 16, 12, 2> = JSON::parse_json_from_string("{\"a\":1}5");
+}
+
+/// Trailing quote: opens a string that never closes.
+#[test(should_fail)]
+fn fix_r6_trailing_quote_rejected() {
+    let _: JSON<8, 4, 16, 12, 2> = JSON::parse_json_from_string("{\"a\":1}\"");
+}
+
+/// Trailing literal start: opens a `true`/`false`/`null` that never completes.
+#[test(should_fail)]
+fn fix_r6_trailing_literal_start_rejected() {
+    let _: JSON<8, 4, 16, 12, 2> = JSON::parse_json_from_string("{\"a\":1}t");
+}
+
+/// Positive control: the same buffer size, exact fit, ending in grammar mode. The new
+/// assert must not touch the honest path -- including the exact-fit case, which is the
+/// one our adapter always produces.
+#[test]
+fn fix_r6_exact_size_buffer_still_parses() {
+    let exact: JSON<7, 4, 16, 12, 2> = JSON::parse_json_from_string("{\"a\":1}");
+    assert(exact.get_number_unchecked("a".as_bytes()) == 1, "exact-size buffer");
+
+    // and the padded case, where `parse_json` appends SPACEs itself
+    let padded: JSON<24, 4, 16, 12, 2> = JSON::parse_json_from_string("{\"a\":1}");
+    assert(padded.get_number_unchecked("a".as_bytes()) == 1, "SPACE-padded buffer");
+}
