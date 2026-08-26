@@ -631,9 +631,8 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         // bytes could be dropped and the record still accepted as valid JSON
         // (`length.assert_max_bit_size::<2>()` above is what caps it at 3).
         //
-        // Findings R5/R6 of reports/SOUNDNESS-PROBE.md: R5 (an *illegal* trailing byte,
-        // via the missing range check on `ScanData::scan_token`) is closed by the line
-        // above; R6 (a *legal token-start* trailing byte) needs this one.
+        // The range check closes an illegal trailing mode; a legal token-start
+        // trailing byte additionally needs the terminal grammar assertion below.
         //
         // Both need `StringBytes == NumBytes`. `parse_json` SPACE-pads a short input,
         // and that padding terminates the junk byte and turns it into a real token, so
@@ -753,6 +752,18 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             transcript_ptr += update;
         }
         self.transcript = updated_transcript;
+        self.transcript_length = transcript_ptr as u32;
+
+        // The transcript returned by the unconstrained post-processing hint is
+        // part of the parser's witness. Constrain every slot beyond the final
+        // logical length to the canonical empty value.
+        let final_valid: [u32; MaxNumTokens] = get_validity_flags(self.transcript_length);
+        for i in 0..MaxNumTokens {
+            assert(
+                self.transcript[i] * (1 - final_valid[i] as Field) == 0,
+                "capture_missing_tokens: non-empty transcript tail",
+            );
+        }
 
         // TODO we could make this more efficient...probably not a big deal though
         let first = TranscriptEntry::from_field(self.transcript[0]);

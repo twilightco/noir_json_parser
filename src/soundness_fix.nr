@@ -359,7 +359,7 @@ fn fix_get_object_on_an_array_is_rejected() {
 // buffer (`StringBytes == NumBytes`, which is how our adapter always calls
 // `parse_json`), used to be caught only by an assert inside the unconstrained
 // `__build_transcript` -- i.e. not caught at all against a malicious prover. The
-// mutation experiment is in reports/SOUNDNESS-PROBE.md esp. 11b; it cannot live here,
+// regression cases below exercise the constrained terminal-state check,
 // because it needs the brillig assert removed.
 //
 // These are `should_fail` without a message on purpose: on an honest run the brillig
