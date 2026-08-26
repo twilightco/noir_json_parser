@@ -105,7 +105,6 @@ pub(crate) struct ScanData {
     pub(crate) scan_token: Field,
     pub(crate) push_transcript: bool,
     pub(crate) increase_length: bool,
-    pub(crate) is_potential_escape_sequence: bool,
 }
 
 impl ScanData {
@@ -115,21 +114,23 @@ impl ScanData {
         let scan_token: Field = bytes[0] as Field;
         let push_transcript = bytes[1] != 0;
         let increase_length = bytes[2] != 0;
-        let is_potential_escape_sequence = bytes[3] != 0;
-        let error = bytes[4] as Field * 0x100 + bytes[5] as Field;
+        // byte 3 used to carry "the previous byte was a backslash", which is now a scan
+        // mode of its own; everything above the flags is the error marker.
+        let error = bytes[3] as Field + bytes[4] as Field * 0x100 + bytes[5] as Field * 0x10000;
         assert(error == 0, "ScanData: Invalid token");
-        ScanData { scan_token, push_transcript, increase_length, is_potential_escape_sequence }
+        ScanData { scan_token, push_transcript, increase_length }
     }
 
     pub(crate) fn from_field(f: Field) -> Self {
         // Safety: check the comments below
         let result = unsafe { ScanData::__from_field(f) };
         // checks the input field is a valid combination of the outputs of the decomposition
+        // (an error entry carries `error * 0x100000000`, which no combination can match,
+        // so this is also what rejects a rejected byte in a constrained context)
         assert(
             result.scan_token
                 + result.push_transcript as Field * 0x100
                 + result.increase_length as Field * 0x10000
-                + result.is_potential_escape_sequence as Field * 0x1000000
                 == f,
         );
         result

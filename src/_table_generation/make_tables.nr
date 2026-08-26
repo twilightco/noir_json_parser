@@ -1,5 +1,8 @@
 //! Contains methods used to generate tables in `json_tables.nr`. These table generation methods shouldn't be used inside of actual circuits.
-use crate::enums::CaptureMode::{CAPTURE_TABLE_HALF, NUM_CAPTURE_MODES, STRING_CAPTURE};
+use crate::enums::CaptureMode::{
+    CAPTURE_TABLE_SIZE, NUM_CAPTURE_MODES, NUM_PUSHING_CAPTURE_MODES, PUSHED_TABLE_SIZE,
+    STRING_CAPTURE,
+};
 use crate::enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 use crate::enums::Token::{
     BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, END_ARRAY_TOKEN, END_OBJECT_TOKEN, KEY_SEPARATOR_TOKEN,
@@ -14,14 +17,11 @@ use crate::json_tables::TOKEN_VALIDATION_TABLE;
 use crate::token_flags::TokenFlags;
 use crate::transcript_entry::ValidationFlags;
 use super::make_tables_subtables::{
-    extra_numeric_capture_rows, GRAMMAR_CAPTURE_ERROR_FLAG, GRAMMAR_CAPTURE_INCREASE_LENGTH,
-    GRAMMAR_CAPTURE_PUSH_TRANSCRIPT,
-    GRAMMAR_CAPTURE_TABLE, GRAMMAR_CAPTURE_TOKEN, LITERAL_CAPTURE_ERROR_FLAG,
-    LITERAL_CAPTURE_INCREASE_LENGTH, LITERAL_CAPTURE_PUSH_TRANSCRIPT, LITERAL_CAPTURE_TABLE,
-    LITERAL_CAPTURE_TOKEN, NUMERIC_CAPTURE_ERROR_FLAG, NUMERIC_CAPTURE_INCREASE_LENGTH,
-    NUMERIC_CAPTURE_PUSH_TRANSCRIPT, NUMERIC_CAPTURE_TABLE, NUMERIC_CAPTURE_TOKEN,
-    STRING_CAPTURE_ERROR_FLAG, STRING_CAPTURE_INCREASE_LENGTH, STRING_CAPTURE_PUSH_TRANSCRIPT,
-    STRING_CAPTURE_TABLE, STRING_CAPTURE_TOKEN, TOKEN_IS_NUMERIC_OR_LITERAL,
+    escape_capture_rows, GRAMMAR_CAPTURE_ERROR_FLAG, GRAMMAR_CAPTURE_INCREASE_LENGTH,
+    GRAMMAR_CAPTURE_PUSH_TRANSCRIPT, GRAMMAR_CAPTURE_TABLE, GRAMMAR_CAPTURE_TOKEN,
+    LITERAL_CAPTURE_ERROR_FLAG, LITERAL_CAPTURE_INCREASE_LENGTH, LITERAL_CAPTURE_PUSH_TRANSCRIPT,
+    LITERAL_CAPTURE_TABLE, LITERAL_CAPTURE_TOKEN, numeric_capture_rows, string_capture_row,
+    TOKEN_IS_NUMERIC_OR_LITERAL,
 };
 
 /// The five parallel sub-tables, one row per scan mode, in `CaptureMode` order.
@@ -38,65 +38,113 @@ struct CaptureSubTables {
 }
 
 unconstrained fn capture_sub_tables() -> CaptureSubTables {
-    let n = extra_numeric_capture_rows();
+    // `n` holds NUMERIC, ZERO, FRAC, EXP_DIGITS, MINUS, DOT, EXP, EXP_SIGN and
+    // `e` holds STRING_ESCAPE, STRING_UNICODE_1..4, both in that order. Together
+    // with the four hand-written rows they cover all 16 modes.
+    let n = numeric_capture_rows();
+    let e = escape_capture_rows();
+    let string = string_capture_row();
     CaptureSubTables {
         capture: [
             GRAMMAR_CAPTURE_TABLE,
-            STRING_CAPTURE_TABLE,
-            NUMERIC_CAPTURE_TABLE,
-            LITERAL_CAPTURE_TABLE,
+            string.capture,
             n[0].capture,
+            LITERAL_CAPTURE_TABLE,
             n[1].capture,
             n[2].capture,
             n[3].capture,
+            n[4].capture,
+            n[5].capture,
+            n[6].capture,
+            n[7].capture,
+            e[0].capture,
+            e[1].capture,
+            e[2].capture,
+            e[3].capture,
+            e[4].capture,
         ],
         token: [
             GRAMMAR_CAPTURE_TOKEN,
-            STRING_CAPTURE_TOKEN,
-            NUMERIC_CAPTURE_TOKEN,
-            LITERAL_CAPTURE_TOKEN,
+            string.token,
             n[0].token,
+            LITERAL_CAPTURE_TOKEN,
             n[1].token,
             n[2].token,
             n[3].token,
+            n[4].token,
+            n[5].token,
+            n[6].token,
+            n[7].token,
+            e[0].token,
+            e[1].token,
+            e[2].token,
+            e[3].token,
+            e[4].token,
         ],
         push_transcript: [
             GRAMMAR_CAPTURE_PUSH_TRANSCRIPT,
-            STRING_CAPTURE_PUSH_TRANSCRIPT,
-            NUMERIC_CAPTURE_PUSH_TRANSCRIPT,
-            LITERAL_CAPTURE_PUSH_TRANSCRIPT,
+            string.push_transcript,
             n[0].push_transcript,
+            LITERAL_CAPTURE_PUSH_TRANSCRIPT,
             n[1].push_transcript,
             n[2].push_transcript,
             n[3].push_transcript,
+            n[4].push_transcript,
+            n[5].push_transcript,
+            n[6].push_transcript,
+            n[7].push_transcript,
+            e[0].push_transcript,
+            e[1].push_transcript,
+            e[2].push_transcript,
+            e[3].push_transcript,
+            e[4].push_transcript,
         ],
         increase_length: [
             GRAMMAR_CAPTURE_INCREASE_LENGTH,
-            STRING_CAPTURE_INCREASE_LENGTH,
-            NUMERIC_CAPTURE_INCREASE_LENGTH,
-            LITERAL_CAPTURE_INCREASE_LENGTH,
+            string.increase_length,
             n[0].increase_length,
+            LITERAL_CAPTURE_INCREASE_LENGTH,
             n[1].increase_length,
             n[2].increase_length,
             n[3].increase_length,
+            n[4].increase_length,
+            n[5].increase_length,
+            n[6].increase_length,
+            n[7].increase_length,
+            e[0].increase_length,
+            e[1].increase_length,
+            e[2].increase_length,
+            e[3].increase_length,
+            e[4].increase_length,
         ],
         error_flag: [
             GRAMMAR_CAPTURE_ERROR_FLAG,
-            STRING_CAPTURE_ERROR_FLAG,
-            NUMERIC_CAPTURE_ERROR_FLAG,
-            LITERAL_CAPTURE_ERROR_FLAG,
+            string.error_flag,
             n[0].error_flag,
+            LITERAL_CAPTURE_ERROR_FLAG,
             n[1].error_flag,
             n[2].error_flag,
             n[3].error_flag,
+            n[4].error_flag,
+            n[5].error_flag,
+            n[6].error_flag,
+            n[7].error_flag,
+            e[0].error_flag,
+            e[1].error_flag,
+            e[2].error_flag,
+            e[3].error_flag,
+            e[4].error_flag,
         ],
     }
 }
 
-unconstrained fn make_ascii_to_token_table() -> [Field; CAPTURE_TABLE_HALF] {
+/// Sized to `NUM_PUSHING_CAPTURE_MODES`, not `NUM_CAPTURE_MODES`: it is indexed by the
+/// `mode * 256 + byte` of a transcript entry, and an entry can only be pushed from an
+/// accepting mode. See the ordering note in `CaptureMode`.
+unconstrained fn make_ascii_to_token_table() -> [Field; PUSHED_TABLE_SIZE] {
     let sub = capture_sub_tables();
-    let mut result: [Field; CAPTURE_TABLE_HALF] = [0; CAPTURE_TABLE_HALF];
-    for i in 0..NUM_CAPTURE_MODES {
+    let mut result: [Field; PUSHED_TABLE_SIZE] = [0; PUSHED_TABLE_SIZE];
+    for i in 0..NUM_PUSHING_CAPTURE_MODES {
         for j in 0..128 {
             let token = sub.token[i][j];
             result[i * 256 + j] = token as Field;
@@ -321,66 +369,48 @@ unconstrained fn make_token_validation_table() -> [Field; NUM_TOKENS * NUM_TOKEN
     flattened_flags
 }
 
-unconstrained fn make_json_capture_table() -> [Field; CAPTURE_TABLE_HALF * 2] {
+unconstrained fn make_json_capture_table() -> [Field; CAPTURE_TABLE_SIZE] {
     let sub = capture_sub_tables();
-    let backslash: u32 = "\\".as_bytes()[0] as u32;
-    let quotes: u32 = "\"".as_bytes()[0] as u32;
-    let mut result: [Field; CAPTURE_TABLE_HALF * 2] = [0; CAPTURE_TABLE_HALF * 2];
-    for previous_was_potential_capture_escape in 0..2 {
-        for i in 0..NUM_CAPTURE_MODES {
-            for j in 0..128 {
-                let mut scan_token = sub.capture[i][j];
-                let mut push_transcript = sub.push_transcript[i][j] as Field;
-                let mut increase_length = sub.increase_length[i][j] as Field;
-                let mut error = sub.error_flag[i][j] as Field;
+    let mut result: [Field; CAPTURE_TABLE_SIZE] = [0; CAPTURE_TABLE_SIZE];
+    for i in 0..NUM_CAPTURE_MODES {
+        for j in 0..128 {
+            let scan_token = sub.capture[i][j];
+            let push_transcript = sub.push_transcript[i][j] as Field;
+            let increase_length = sub.increase_length[i][j] as Field;
+            let error = sub.error_flag[i][j] as Field;
 
-                let mut is_potential_capture_escape = 0;
-                if (scan_token == STRING_CAPTURE) & (j == backslash) {
-                    is_potential_capture_escape = 1;
-                }
-                if ((previous_was_potential_capture_escape == 1) & (j == quotes)) {
-                    scan_token = STRING_CAPTURE;
-                    push_transcript = 0;
-                    increase_length = 1;
-                    error = 0;
-                }
-                let full = scan_token
-                    + push_transcript * 0x100
-                    + increase_length * 0x10000
-                    + is_potential_capture_escape * 0x1000000
-                    + error * 0x100000000;
-                let index =
-                    i * 256 + previous_was_potential_capture_escape * CAPTURE_TABLE_HALF + j;
-                result[index] = full;
-            }
-            // bytes 0x80..0xFF
-            //
-            // The original implementation makes every one of them an error in every
-            // mode, which is why a single accented letter anywhere in a document
-            // makes the whole document unparseable. RFC 8259 allows any Unicode
-            // scalar value inside a string, and a key *is* a string, so inside
-            // `STRING_CAPTURE` they are ordinary string content (same encoding as
-            // any other content byte: stay in the mode, extend the token, do not
-            // push, no error). Outside a string they stay an error: no JSON token
-            // starts with a high byte.
-            //
-            // This is byte transparency, NOT UTF-8 validation: an overlong
-            // encoding, a truncated sequence or a lone continuation byte all get
-            // through, and `get_string` hands back the raw bytes. Validating
-            // well-formedness needs the *sequence* state (how many continuation
-            // bytes are still owed, and which ranges are legal for the leader),
-            // i.e. three or four more capture modes on top of the eight, plus a
-            // rule that a string cannot close mid-sequence. It is not something
-            // this table can express as it stands.
-            for j in 0..128 {
-                let index =
-                    i * 256 + previous_was_potential_capture_escape * CAPTURE_TABLE_HALF + j + 128;
-                if i as Field == STRING_CAPTURE {
-                    // scan_token = STRING_CAPTURE, push = 0, increase_length = 1
-                    result[index] = STRING_CAPTURE + 0x10000;
-                } else {
-                    result[index] = 0x100000000; // error flag
-                }
+            let full = scan_token
+                + push_transcript * 0x100
+                + increase_length * 0x10000
+                + error * 0x100000000;
+            result[i * 256 + j] = full;
+        }
+        // bytes 0x80..0xFF
+        //
+        // The original implementation makes every one of them an error in every
+        // mode, which is why a single accented letter anywhere in a document
+        // makes the whole document unparseable. RFC 8259 allows any Unicode
+        // scalar value inside a string, and a key *is* a string, so inside
+        // `STRING_CAPTURE` they are ordinary string content (same encoding as
+        // any other content byte: stay in the mode, extend the token, do not
+        // push, no error). Outside a string they stay an error: no JSON token
+        // starts with a high byte, and no escape sequence contains one.
+        //
+        // This is byte transparency, NOT UTF-8 validation: an overlong
+        // encoding, a truncated sequence or a lone continuation byte all get
+        // through, and `get_string` hands back the raw bytes. That is a
+        // deliberate, documented guarantee (see the README), not an oversight:
+        // the bytes come from the
+        // server over TLS, so malformed UTF-8 is not something a prover can
+        // introduce, and validating the whole record would make one bad byte in
+        // a field no predicate reads sink the entire proof.
+        for j in 0..128 {
+            let index = i * 256 + j + 128;
+            if i as Field == STRING_CAPTURE {
+                // scan_token = STRING_CAPTURE, push = 0, increase_length = 1
+                result[index] = STRING_CAPTURE + 0x10000;
+            } else {
+                result[index] = 0x100000000; // error flag
             }
         }
     }
@@ -388,10 +418,12 @@ unconstrained fn make_json_capture_table() -> [Field; CAPTURE_TABLE_HALF * 2] {
     result
 }
 
-unconstrained fn make_process_raw_transcript_table() -> [Field; CAPTURE_TABLE_HALF] {
+/// Sized to `NUM_PUSHING_CAPTURE_MODES` for the same reason as
+/// `make_ascii_to_token_table`.
+unconstrained fn make_process_raw_transcript_table() -> [Field; PUSHED_TABLE_SIZE] {
     let sub = capture_sub_tables();
-    let mut result: [Field; CAPTURE_TABLE_HALF] = [0; CAPTURE_TABLE_HALF];
-    for i in 0..NUM_CAPTURE_MODES {
+    let mut result: [Field; PUSHED_TABLE_SIZE] = [0; PUSHED_TABLE_SIZE];
+    for i in 0..NUM_PUSHING_CAPTURE_MODES {
         for j in 0..128 {
             let token = sub.token[i][j];
             let token_is_numeric_or_literal = TOKEN_IS_NUMERIC_OR_LITERAL[token];
@@ -542,6 +574,46 @@ fn test_generate_token_flags_table() {
     unsafe {
         let r = generate_token_flags_table();
         assert(r == TOKEN_FLAGS_TABLE);
+    }
+}
+
+/// `ASCII_TO_TOKEN_TABLE` and `PROCESS_RAW_TRANSCRIPT_TABLE` are sized to
+/// `NUM_PUSHING_CAPTURE_MODES * 256`, not `NUM_CAPTURE_MODES * 256`, because they are
+/// indexed by the `mode * 256 + byte` of a transcript entry. That is only sound while
+/// every mode that can push a transcript entry sorts below the line: a pushing mode
+/// above it would read past the end of both tables on a perfectly valid document.
+///
+/// Nothing in the type system holds the ordering, so hold it here.
+#[test]
+fn test_pushing_modes_come_first() {
+    // Safety: test code
+    unsafe {
+        let sub = capture_sub_tables();
+        for i in NUM_PUSHING_CAPTURE_MODES..NUM_CAPTURE_MODES {
+            for j in 0..128 {
+                assert(
+                    !sub.push_transcript[i][j],
+                    "a capture mode above NUM_PUSHING_CAPTURE_MODES can push a transcript entry",
+                );
+            }
+        }
+    }
+}
+
+/// ...and the line is not slack either: every mode below it really does push something,
+/// so the two tables are no bigger than they need to be.
+#[test]
+fn test_no_idle_mode_below_the_pushing_line() {
+    // Safety: test code
+    unsafe {
+        let sub = capture_sub_tables();
+        for i in 0..NUM_PUSHING_CAPTURE_MODES {
+            let mut pushes = false;
+            for j in 0..128 {
+                pushes |= sub.push_transcript[i][j];
+            }
+            assert(pushes, "a capture mode below NUM_PUSHING_CAPTURE_MODES never pushes");
+        }
     }
 }
 

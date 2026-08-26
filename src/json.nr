@@ -1,9 +1,9 @@
 use crate::_comparison_tools::bounds_checker::get_validity_flags;
-use crate::enums::CaptureMode::{CAPTURE_TABLE_HALF, GRAMMAR_CAPTURE};
+use crate::enums::CaptureMode::GRAMMAR_CAPTURE;
 use crate::enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 use crate::enums::Token::{
-    BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, END_ARRAY_TOKEN, END_OBJECT_TOKEN,
-    KEY_SEPARATOR_TOKEN, KEY_TOKEN, LITERAL_TOKEN, NUM_TOKENS, NUMERIC_TOKEN, STRING_TOKEN,
+    BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, END_ARRAY_TOKEN, END_OBJECT_TOKEN, KEY_SEPARATOR_TOKEN,
+    KEY_TOKEN, LITERAL_TOKEN, NUM_TOKENS, NUMERIC_TOKEN, STRING_TOKEN,
 };
 use crate::get_literal::JSONLiteral;
 use crate::json_entry::{JSONContextStackEntry, JSONEntry, JSONEntryPacked};
@@ -541,14 +541,12 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
      * @details JSON_CAPTURE_TABLE takes the following as input:
      *          1. the ascii byte at the current location in the json
      *          2. the current scan mode (are we searching for grammar, strings, numbers or literals?)
-     *          3. could this byte potentially be an escape sequence? (i.e. the previous byte was a backslash character "\" and scan_mode == STRING_CAPTURE)
      *          The table outputs the following flags:
      *          1. what token have we scanned? (listed in enums::Token)
      *          2. should we push this token to the transcript (no push if token == NO_TOKEN)
      *          3. should we increase the length of the current entry we're evaluating?
      *              (i.e. if token == STRING_TOKEN and scan_mode == STRING_CAPTURE, then increase the length because we're in the process of scanning a string)
-     *          4. is this scanned ascii character a potential escape sequence? i.e. scan_mode == STRING_CAPTURE and ascii = "\"
-     *          5. have we entered an error state? (i.e. invalid grammar e.g. ":" is followed by "}")
+     *          4. have we entered an error state? (i.e. invalid grammar e.g. ":" is followed by "}")
      *
      * NOTE: we represent error states in a nonstandard way to reduce gate count. Instead of handling an error flag,
      *       an error state will increase the value of `scan_token` by 0x100000000. This will cause the next access into `JSON_CAPTURE_TABLE` to trigger an out of bounds error
@@ -568,27 +566,19 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         // Safety: check the comments below
         let raw_transcript = unsafe { __build_transcript::<NumBytes, MaxNumTokens>(self.json) };
 
-        // 14 gates per iteration, plus fixed cost for initing 2,048 size lookup table (4,096 gates)
-        let mut previous_was_potential_escape_sequence: bool = false;
+        // 14 gates per iteration, plus the fixed cost of initing the 4,096 entry lookup table
         for i in 0..NumBytes {
             let ascii = self.json[i];
 
             // 1 gate
-            let encoded_ascii = previous_was_potential_escape_sequence as Field
-                * CAPTURE_TABLE_HALF as Field
-                + scan_mode * 256
-                + ascii as Field;
+            let encoded_ascii = scan_mode * 256 + ascii as Field;
             std::as_witness(encoded_ascii);
 
             // 2 gates
             let capture_flags = JSON_CAPTURE_TABLE[cast_num_to_u32(encoded_ascii)];
             // 5 gates
-            let ScanData {
-                scan_token,
-                push_transcript,
-                increase_length,
-                is_potential_escape_sequence,
-            } = ScanData::from_field(capture_flags);
+            let ScanData { scan_token, push_transcript, increase_length } =
+                ScanData::from_field(capture_flags);
 
             // 2 gates
             let raw: Field = raw_transcript[cast_num_to_u32(transcript_ptr)];
@@ -612,7 +602,6 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             // 1 gate
             transcript_ptr += push_transcript as Field;
 
-            previous_was_potential_escape_sequence = is_potential_escape_sequence;
             scan_mode = scan_token;
         }
 
@@ -650,10 +639,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         //
         // 1 gate, once per parse. Message deliberately different from the brillig one
         // in `__build_transcript`, which fires first on an honest run.
-        assert(
-            scan_mode == GRAMMAR_CAPTURE as Field,
-            "build_transcript: scan ended mid-token",
-        );
+        assert(scan_mode == GRAMMAR_CAPTURE as Field, "build_transcript: scan ended mid-token");
 
         JSON {
             json: self.json,
@@ -858,18 +844,14 @@ unconstrained fn __build_transcript<let NumBytes: u32, let MaxNumTokens: u32>(
     let mut transcript_ptr: u32 = 0;
     let mut scan_mode = GRAMMAR_CAPTURE;
     let mut length: Field = 0;
-    let mut previous_was_potential_escape_sequence: bool = false;
     for i in 0..NumBytes {
         // while this assert is in an unconstrained function, the out of bounds access `raw_transcript[transcript_ptr]` in build_transcript also generates failing constraints
         assert(transcript_ptr < MaxNumTokens, "build_transcript: MaxNumTokens limit exceeded!");
         let ascii = json_array[i];
 
-        let encoded_ascii = previous_was_potential_escape_sequence as Field
-            * CAPTURE_TABLE_HALF as Field
-            + scan_mode * 256
-            + ascii as Field;
-        let ScanData { scan_token, push_transcript, increase_length, is_potential_escape_sequence }
-             = ScanData::from_field(JSON_CAPTURE_TABLE[cast_num_to_u32(encoded_ascii)]);
+        let encoded_ascii = scan_mode * 256 + ascii as Field;
+        let ScanData { scan_token, push_transcript, increase_length } =
+            ScanData::from_field(JSON_CAPTURE_TABLE[cast_num_to_u32(encoded_ascii)]);
 
         if push_transcript {
             let new_entry = RawTranscriptEntry::to_field(
@@ -883,8 +865,6 @@ unconstrained fn __build_transcript<let NumBytes: u32, let MaxNumTokens: u32>(
             length += increase_length as Field;
         }
 
-        previous_was_potential_escape_sequence = is_potential_escape_sequence;
-
         scan_mode = scan_token;
     }
 
@@ -896,9 +876,9 @@ unconstrained fn __build_transcript<let NumBytes: u32, let MaxNumTokens: u32>(
     );
 
     // ensure an error isn't hiding in the last scanned token
-    // 3 bits, not 2: there are 8 scan modes now (`ERROR_CAPTURE`
-    // is 8, so it does not fit and is still caught here)
-    scan_mode.assert_max_bit_size::<3>();
+    // 4 bits: there are 16 scan modes (`ERROR_CAPTURE` is 16, so it does not fit
+    // and is still caught here)
+    scan_mode.assert_max_bit_size::<4>();
     raw_transcript
 }
 
@@ -1136,10 +1116,8 @@ fn path_of_three_segments_returns_the_value_getter_too() {
 #[test]
 fn path_does_not_fall_back_to_the_root() {
     let json = nested_path_document();
-    let path: [BoundedVec<u8, 1>; 2] = [
-        BoundedVec::from_array("a".as_bytes()),
-        BoundedVec::from_array("c".as_bytes()),
-    ];
+    let path: [BoundedVec<u8, 1>; 2] =
+        [BoundedVec::from_array("a".as_bytes()), BoundedVec::from_array("c".as_bytes())];
 
     let result: Option<BoundedVec<u8, 10>> = json.get_string_from_path(path);
     assert(result.is_none());
@@ -1343,10 +1321,10 @@ fn test_invalid_literal_4() {
 // number grammar: decimals and negatives
 // ============================================================================
 //
-// The scanner recognises `-? ( 0 | [1-9][0-9]* ) ( . [0-9]+ )?`. Everything the
-// grammar rejects is rejected *inside* `parse_json`, in the tokenizer, with
-// `ScanData: Invalid token` -- not deferred to a getter. The exponent is out of
-// scope and stays an error.
+// The scanner recognises `-? ( 0 | [1-9][0-9]* ) ( . [0-9]+ )? ( [eE] [+-]? [0-9]+ )?`,
+// which is exactly RFC 8259's `number`. Everything the grammar rejects is rejected
+// *inside* `parse_json`, in the tokenizer, with `ScanData: Invalid token` -- not
+// deferred to a getter.
 //
 // `get_value` returns the raw bytes and `value_type == NUMERIC_TOKEN`, so a
 // decimal and an integer are indistinguishable by type: a reader that wants a
@@ -1417,6 +1395,52 @@ fn number_accepts_plain_zero() {
 fn number_accepts_negative_zero_decimal() {
     let json: NumberJson = JSON::parse_json_from_string("{\"a\":-0.0}");
     number_value_is(json, "-0.0".as_bytes());
+}
+
+#[test]
+fn number_accepts_a_lowercase_exponent() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":1e5}");
+    number_value_is(json, "1e5".as_bytes());
+}
+
+#[test]
+fn number_accepts_an_uppercase_exponent() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":1E5}");
+    number_value_is(json, "1E5".as_bytes());
+}
+
+#[test]
+fn number_accepts_a_signed_exponent_on_a_decimal() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":1.5E-3}");
+    number_value_is(json, "1.5E-3".as_bytes());
+}
+
+#[test]
+fn number_accepts_a_positive_exponent() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":2e+10}");
+    number_value_is(json, "2e+10".as_bytes());
+}
+
+/// `01` is not JSON but `1e05` is: the exponent has no leading-zero rule, which is why
+/// `NUMERIC_EXP_DIGITS` cannot reuse `NUMERIC` / `NUMERIC_ZERO`.
+#[test]
+fn number_accepts_a_leading_zero_in_the_exponent() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":1e05}");
+    number_value_is(json, "1e05".as_bytes());
+}
+
+#[test]
+fn number_accepts_an_exponent_on_zero() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":0e0}");
+    number_value_is(json, "0e0".as_bytes());
+}
+
+/// The tokenizer got wider; `get_number` did not. It reads plain unsigned integers and
+/// nothing else, so an exponent is still refused there.
+#[test(should_fail_with = "get_number: numeric token is not a plain unsigned integer")]
+fn number_exponent_is_refused_by_get_number() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":1e5}");
+    let _ = json.get_number_unchecked("a".as_bytes());
 }
 
 #[test]
@@ -1538,18 +1562,28 @@ fn number_rejects_unary_plus() {
 }
 
 #[test(should_fail_with = "ScanData: Invalid token")]
-fn number_rejects_exponent_lowercase() {
-    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1e5}");
+fn number_rejects_a_bare_exponent_marker() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1e}");
 }
 
 #[test(should_fail_with = "ScanData: Invalid token")]
-fn number_rejects_exponent_uppercase() {
-    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1E5}");
+fn number_rejects_an_exponent_sign_with_no_digits() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1e-}");
 }
 
 #[test(should_fail_with = "ScanData: Invalid token")]
-fn number_rejects_negative_exponent() {
-    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1.5E-3}");
+fn number_rejects_a_second_exponent() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1e2e3}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_a_fraction_after_the_exponent() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1e2.5}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_an_exponent_after_a_bare_minus() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":-e5}");
 }
 
 #[test(should_fail_with = "ScanData: Invalid token")]
@@ -1595,7 +1629,9 @@ type KeyBoundaryJson = JSON<80, 6, 16, 9, 2>;
 
 #[test]
 fn key_of_61_bytes_round_trips() {
-    let json: KeyBoundaryJson = JSON::parse_json_from_string("{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}");
+    let json: KeyBoundaryJson = JSON::parse_json_from_string(
+        "{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}",
+    );
     let key = "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk".as_bytes();
     assert_eq(key.len(), 61);
     assert(json.get_number_unchecked(key) == 1);
@@ -1603,7 +1639,9 @@ fn key_of_61_bytes_round_trips() {
 
 #[test]
 fn key_of_62_bytes_round_trips() {
-    let json: KeyBoundaryJson = JSON::parse_json_from_string("{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}");
+    let json: KeyBoundaryJson = JSON::parse_json_from_string(
+        "{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}",
+    );
     let key = "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk".as_bytes();
     assert_eq(key.len(), 62);
     assert(json.get_number_unchecked(key) == 1);
@@ -1613,16 +1651,27 @@ fn key_of_62_bytes_round_trips() {
 /// length: truncation would make these two collide.
 #[test]
 fn keys_of_62_bytes_are_not_truncated() {
-    let json: JSON<160, 9, 24, 13, 2> =
-        JSON::parse_json_from_string("{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA\":1,\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaB\":2}");
-    assert(json.get_number_unchecked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA".as_bytes()) == 1);
-    assert(json.get_number_unchecked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaB".as_bytes()) == 2);
+    let json: JSON<160, 9, 24, 13, 2> = JSON::parse_json_from_string(
+        "{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA\":1,\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaB\":2}",
+    );
+    assert(
+        json.get_number_unchecked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA"
+            .as_bytes())
+            == 1,
+    );
+    assert(
+        json.get_number_unchecked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaB"
+            .as_bytes())
+            == 2,
+    );
 }
 
 /// One byte past capacity is rejected by the parse itself, not by the getter.
 #[test(should_fail_with = "key too large")]
 fn key_of_63_bytes_is_rejected_at_parse() {
-    let _: KeyBoundaryJson = JSON::parse_json_from_string("{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}");
+    let _: KeyBoundaryJson = JSON::parse_json_from_string(
+        "{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}",
+    );
 }
 
 /// ... and a lookup with an over-long key is rejected too, even against a JSON that
@@ -1630,14 +1679,152 @@ fn key_of_63_bytes_is_rejected_at_parse() {
 #[test(should_fail_with = "key too large")]
 fn lookup_with_a_63_byte_key_is_rejected() {
     let json: KeyBoundaryJson = JSON::parse_json_from_string("{\"a\":1}");
-    let _ = json.get_number("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk".as_bytes());
+    let _ = json.get_number("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
+        .as_bytes());
+}
+
+// ============================================================================
+// string grammar: escapes and raw control bytes
+// ============================================================================
+//
+// The original implementation tracks escapes with one bit ("the previous byte was a
+// backslash"), which buys exactly one thing: a `"` straight after a `\` does not close
+// the string. It cannot say which characters may follow a backslash and it cannot count,
+// so `\q`, `\u12"` and `\u00zz` all parsed. Five scan modes replace the bit and
+// recognise `\ ( ["\/bfnrt] | u [0-9a-fA-F]{4} )`. Dropping the bit halves
+// `JSON_CAPTURE_TABLE`, which is what pays for them.
+//
+// Raw TAB, LF and CR inside a string were string content. RFC 8259 forbids every byte
+// below 0x20 raw inside a string; the other 29 were already errors here.
+//
+// This is escape *syntax*. `\uD800` unpaired is still accepted and
+// `process_escape_sequences` still unescapes only a subset -- see the README.
+
+type EscapeJson = JSON<48, 5, 16, 9, 2>;
+
+/// The eight one-character escapes, and `\uXXXX` in both hex cases.
+#[test]
+fn escape_accepts_every_legal_form() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\\"\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\\\\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\/\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\b\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\f\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\n\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\r\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\t\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\u00e9\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\uABCD\"}");
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\u0F9f\"}");
+}
+
+/// The one thing the old escape bit did get right, and the reason it existed.
+#[test]
+fn escape_quote_does_not_close_the_string() {
+    let json: EscapeJson = JSON::parse_json_from_string("{\"a\":\"x\\\"y\"}");
+    let v: JSONValue<16> = json.get_value("a".as_bytes()).unwrap();
+    assert(v.is_string());
+    assert_eq(v.value.len(), 4);
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn escape_rejects_an_unknown_escape_character() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\q\"}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn escape_rejects_a_single_quote_escape() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\'\"}");
+}
+
+/// A trailing backslash: the closing quote arrives while the scanner is waiting for the
+/// escaped character, and `"` is a legal escape, so the string never closes and the
+/// document ends mid-token.
+#[test(should_fail)]
+fn escape_rejects_a_trailing_backslash() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"x\\\"}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn escape_rejects_a_short_unicode_escape() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\u12\"}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn escape_rejects_a_non_hex_unicode_escape() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\u00zz\"}");
+}
+
+/// Three hex digits then a legal string byte: the fourth position accepts hex only.
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn escape_rejects_a_unicode_escape_cut_short_by_content() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\":\"\\u00fg\"}");
+}
+
+/// A high byte is string content, but not inside an escape.
+#[test(should_fail)]
+fn escape_rejects_a_high_byte_inside_a_unicode_escape() {
+    let mut doc: [u8; 14] = "{\"a\":\"\\u00eF\"}".as_bytes();
+    doc[11] = 0xC3; // the fourth hex digit
+    let _: EscapeJson = JSON::parse_json(doc);
+}
+
+/// Keys are strings, so they go through the same modes.
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn escape_rejects_a_bad_escape_in_a_key() {
+    let _: EscapeJson = JSON::parse_json_from_string("{\"a\\q\":1}");
+}
+
+#[test]
+fn escape_accepts_a_unicode_escape_in_a_key() {
+    let json: EscapeJson = JSON::parse_json_from_string("{\"a\\u0041\":1}");
+    assert(json.get_number_unchecked("a\\u0041".as_bytes()) == 1);
+}
+
+/// Raw TAB (0x09), LF (0x0A) and CR (0x0D) inside a string. They were the only three
+/// control bytes still accepted, and the only three whose `increase_length` disagreed
+/// with their `capture`, so a raw tab also silently shortened the token it was in.
+fn document_with_raw_byte_in_a_string(byte: u8) -> [u8; 11] {
+    let mut doc: [u8; 11] = "{\"a\":\"x y\"}".as_bytes();
+    doc[7] = byte;
+    doc
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn string_rejects_a_raw_tab() {
+    let _: EscapeJson = JSON::parse_json(document_with_raw_byte_in_a_string(0x09));
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn string_rejects_a_raw_line_feed() {
+    let _: EscapeJson = JSON::parse_json(document_with_raw_byte_in_a_string(0x0A));
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn string_rejects_a_raw_carriage_return() {
+    let _: EscapeJson = JSON::parse_json(document_with_raw_byte_in_a_string(0x0D));
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn string_rejects_a_raw_null_byte() {
+    let _: EscapeJson = JSON::parse_json(document_with_raw_byte_in_a_string(0x00));
+}
+
+/// The same three bytes stay legal *between* tokens, which is where JSON allows them.
+#[test]
+fn whitespace_between_tokens_is_still_accepted() {
+    let mut doc: [u8; 13] = "{\"a\":   1   }".as_bytes();
+    doc[5] = 0x09;
+    doc[6] = 0x0A;
+    doc[7] = 0x0D;
+    let json: EscapeJson = JSON::parse_json(doc);
+    assert(json.get_number_unchecked("a".as_bytes()) == 1);
 }
 
 type Utf8Json = JSON<24, 4, 16, 9, 2>;
 
 global UTF8_EACUTE: [u8; 13] = [123, 34, 97, 34, 58, 34, 99, 97, 102, 195, 169, 34, 125];
-global UTF8_JAPANESE: [u8; 14] =
-    [123, 34, 97, 34, 58, 34, 230, 151, 165, 230, 156, 172, 34, 125];
+global UTF8_JAPANESE: [u8; 14] = [123, 34, 97, 34, 58, 34, 230, 151, 165, 230, 156, 172, 34, 125];
 global UTF8_EMOJI: [u8; 12] = [123, 34, 97, 34, 58, 34, 240, 159, 152, 128, 34, 125];
 global UTF8_KEY: [u8; 12] = [123, 34, 99, 105, 116, 116, 195, 160, 34, 58, 49, 125];
 global UTF8_LONE_HIGH_BYTE_IN_STRING: [u8; 9] = [123, 34, 97, 34, 58, 34, 255, 34, 125];

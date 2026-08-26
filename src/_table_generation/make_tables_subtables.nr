@@ -1,6 +1,9 @@
 use crate::enums::CaptureMode::{
     ERROR_CAPTURE, GRAMMAR_CAPTURE, LITERAL_CAPTURE, NUMERIC_CAPTURE, NUMERIC_DOT_CAPTURE,
-    NUMERIC_FRAC_CAPTURE, NUMERIC_MINUS_CAPTURE, NUMERIC_ZERO_CAPTURE, STRING_CAPTURE,
+    NUMERIC_EXP_CAPTURE, NUMERIC_EXP_DIGITS_CAPTURE, NUMERIC_EXP_SIGN_CAPTURE, NUMERIC_FRAC_CAPTURE,
+    NUMERIC_MINUS_CAPTURE, NUMERIC_ZERO_CAPTURE, STRING_CAPTURE, STRING_ESCAPE_CAPTURE,
+    STRING_UNICODE_1_CAPTURE, STRING_UNICODE_2_CAPTURE, STRING_UNICODE_3_CAPTURE,
+    STRING_UNICODE_4_CAPTURE,
 };
 use crate::enums::Token::{
     BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, END_ARRAY_TOKEN, END_OBJECT_TOKEN, KEY_SEPARATOR_TOKEN,
@@ -271,137 +274,6 @@ pub(crate) global STRING_CAPTURE_TABLE: [Field; 128] = [
     /*"|"*/ STRING_CAPTURE,
     /*"}"*/ STRING_CAPTURE,
     /*"~"*/ STRING_CAPTURE,
-    /*DEL*/ ERROR_CAPTURE,
-];
-
-pub(crate) global NUMERIC_CAPTURE_TABLE: [Field; 128] = [
-    /* NULL */ ERROR_CAPTURE,
-    /* SOH */ ERROR_CAPTURE,
-    /* TXT */ ERROR_CAPTURE,
-    /* ETX */ ERROR_CAPTURE,
-    /* EOT */ ERROR_CAPTURE,
-    /* ENQ */ ERROR_CAPTURE,
-    /* ACK */ ERROR_CAPTURE,
-    /* BEL */ ERROR_CAPTURE,
-    /* BS */ ERROR_CAPTURE,
-    /* TAB */ GRAMMAR_CAPTURE,
-    /* NL */ GRAMMAR_CAPTURE,
-    /* VT */ ERROR_CAPTURE,
-    /* FF */ ERROR_CAPTURE,
-    /* CR */ GRAMMAR_CAPTURE,
-    /* SI */ ERROR_CAPTURE,
-    /* SO */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /*  */ ERROR_CAPTURE,
-    /* SPACE */ GRAMMAR_CAPTURE,
-    /*"!"*/ ERROR_CAPTURE,
-    /* " */ ERROR_CAPTURE,
-    /*"#"*/ ERROR_CAPTURE,
-    /*"$"*/ ERROR_CAPTURE,
-    /*"%"*/ ERROR_CAPTURE,
-    /*"&"*/ ERROR_CAPTURE,
-    /*"'"*/ ERROR_CAPTURE,
-    /*"("*/ ERROR_CAPTURE,
-    /*")"*/ ERROR_CAPTURE,
-    /*"*"*/ ERROR_CAPTURE,
-    /*"+"*/ ERROR_CAPTURE,
-    /*","*/ GRAMMAR_CAPTURE,
-    /*"-"*/ ERROR_CAPTURE,
-    /*"."*/ NUMERIC_DOT_CAPTURE,
-    /*"/"*/ ERROR_CAPTURE,
-    /*"0"*/ NUMERIC_CAPTURE,
-    /*"1"*/ NUMERIC_CAPTURE,
-    /*"2"*/ NUMERIC_CAPTURE,
-    /*"3"*/ NUMERIC_CAPTURE,
-    /*"4"*/ NUMERIC_CAPTURE,
-    /*"5"*/ NUMERIC_CAPTURE,
-    /*"6"*/ NUMERIC_CAPTURE,
-    /*"7"*/ NUMERIC_CAPTURE,
-    /*"8"*/ NUMERIC_CAPTURE,
-    /*"9"*/ NUMERIC_CAPTURE,
-    /*":"*/ ERROR_CAPTURE,
-    /*";"*/ ERROR_CAPTURE,
-    /*"<"*/ ERROR_CAPTURE,
-    /*"="*/ ERROR_CAPTURE,
-    /*">"*/ ERROR_CAPTURE,
-    /*"?"*/ ERROR_CAPTURE,
-    /*"@"*/ ERROR_CAPTURE,
-    /*"A"*/ ERROR_CAPTURE,
-    /*"B"*/ ERROR_CAPTURE,
-    /*"C"*/ ERROR_CAPTURE,
-    /*"D"*/ ERROR_CAPTURE,
-    /*"E"*/ ERROR_CAPTURE,
-    /*"F"*/ ERROR_CAPTURE,
-    /*"G"*/ ERROR_CAPTURE,
-    /*"H"*/ ERROR_CAPTURE,
-    /*"I"*/ ERROR_CAPTURE,
-    /*"J"*/ ERROR_CAPTURE,
-    /*"K"*/ ERROR_CAPTURE,
-    /*"L"*/ ERROR_CAPTURE,
-    /*"M"*/ ERROR_CAPTURE,
-    /*"N"*/ ERROR_CAPTURE,
-    /*"O"*/ ERROR_CAPTURE,
-    /*"P"*/ ERROR_CAPTURE,
-    /*"Q"*/ ERROR_CAPTURE,
-    /*"R"*/ ERROR_CAPTURE,
-    /*"S"*/ ERROR_CAPTURE,
-    /*"T"*/ ERROR_CAPTURE,
-    /*"U"*/ ERROR_CAPTURE,
-    /*"V"*/ ERROR_CAPTURE,
-    /*"W"*/ ERROR_CAPTURE,
-    /*"X"*/ ERROR_CAPTURE,
-    /*"Y"*/ ERROR_CAPTURE,
-    /*"Z"*/ ERROR_CAPTURE,
-    /*"["*/ ERROR_CAPTURE,
-    /*"\"*/ ERROR_CAPTURE,
-    /*"]"*/ GRAMMAR_CAPTURE,
-    /*"^"*/ ERROR_CAPTURE,
-    /*"_"*/ ERROR_CAPTURE,
-    /*"`"*/ ERROR_CAPTURE,
-    /*"a"*/ ERROR_CAPTURE,
-    /*"b"*/ ERROR_CAPTURE,
-    /*"c"*/ ERROR_CAPTURE,
-    /*"d"*/ ERROR_CAPTURE,
-    /*"e"*/ ERROR_CAPTURE,
-    /*"f"*/ ERROR_CAPTURE,
-    /*"g"*/ ERROR_CAPTURE,
-    /*"h"*/ ERROR_CAPTURE,
-    /*"i"*/ ERROR_CAPTURE,
-    /*"j"*/ ERROR_CAPTURE,
-    /*"k"*/ ERROR_CAPTURE,
-    /*"l"*/ ERROR_CAPTURE,
-    /*"m"*/ ERROR_CAPTURE,
-    /*"n"*/ ERROR_CAPTURE,
-    /*"o"*/ ERROR_CAPTURE,
-    /*"p"*/ ERROR_CAPTURE,
-    /*"q"*/ ERROR_CAPTURE,
-    /*"r"*/ ERROR_CAPTURE,
-    /*"s"*/ ERROR_CAPTURE,
-    /*"t"*/ ERROR_CAPTURE,
-    /*"u"*/ ERROR_CAPTURE,
-    /*"v"*/ ERROR_CAPTURE,
-    /*"w"*/ ERROR_CAPTURE,
-    /*"x"*/ ERROR_CAPTURE,
-    /*"y"*/ ERROR_CAPTURE,
-    /*"z"*/ ERROR_CAPTURE,
-    /*"{"*/ ERROR_CAPTURE,
-    /*"|"*/ ERROR_CAPTURE,
-    /*"}"*/ GRAMMAR_CAPTURE,
-    /*"~"*/ ERROR_CAPTURE,
     /*DEL*/ ERROR_CAPTURE,
 ];
 
@@ -1388,432 +1260,6 @@ pub(crate) global STRING_CAPTURE_INCREASE_LENGTH: [bool; 128] = [
     /*DEL*/ false,
 ];
 
-pub(crate) global NUMERIC_CAPTURE_TOKEN: [u32; 128] = [
-    /* NULL */ NO_TOKEN,
-    /* SOH */ NO_TOKEN,
-    /* TXT */ NO_TOKEN,
-    /* ETX */ NO_TOKEN,
-    /* EOT */ NO_TOKEN,
-    /* ENQ */ NO_TOKEN,
-    /* ACK */ NO_TOKEN,
-    /* BEL */ NO_TOKEN,
-    /* BS */ NO_TOKEN,
-    /* TAB */ NUMERIC_TOKEN,
-    /* NL */ NUMERIC_TOKEN,
-    /* VT */ NO_TOKEN,
-    /* FF */ NO_TOKEN,
-    /* CR */ NUMERIC_TOKEN,
-    /* SI */ NO_TOKEN,
-    /* SO */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /*  */ NO_TOKEN,
-    /* SPACE */ NUMERIC_TOKEN,
-    /*"!"*/ NO_TOKEN,
-    /* " */ NUMERIC_TOKEN,
-    /* I THINK? */
-    /*"#"*/ NO_TOKEN,
-    /*"$"*/ NO_TOKEN,
-    /*"%"*/ NO_TOKEN,
-    /*"&"*/ NO_TOKEN,
-    /*"'"*/ NO_TOKEN,
-    /*"("*/ NO_TOKEN,
-    /*")"*/ NO_TOKEN,
-    /*"*"*/ NO_TOKEN,
-    /*"+"*/ NO_TOKEN,
-    /*","*/ NUMERIC_TOKEN,
-    /*"-"*/ NO_TOKEN,
-    /*"."*/ NO_TOKEN,
-    /*"/"*/ NO_TOKEN,
-    /*"0"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"1"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"2"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"3"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"4"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"5"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"6"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"7"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"8"*/ NO_TOKEN,
-    /* I THINK? */
-    /*"9"*/ NO_TOKEN,
-    /* I THINK? */
-    /*":"*/ NO_TOKEN,
-    /*";"*/ NO_TOKEN,
-    /*"<"*/ NO_TOKEN,
-    /*"="*/ NO_TOKEN,
-    /*">"*/ NO_TOKEN,
-    /*"?"*/ NO_TOKEN,
-    /*"@"*/ NO_TOKEN,
-    /*"A"*/ NO_TOKEN,
-    /*"B"*/ NO_TOKEN,
-    /*"C"*/ NO_TOKEN,
-    /*"D"*/ NO_TOKEN,
-    /*"E"*/ NO_TOKEN,
-    /*"F"*/ NO_TOKEN,
-    /*"G"*/ NO_TOKEN,
-    /*"H"*/ NO_TOKEN,
-    /*"I"*/ NO_TOKEN,
-    /*"J"*/ NO_TOKEN,
-    /*"K"*/ NO_TOKEN,
-    /*"L"*/ NO_TOKEN,
-    /*"M"*/ NO_TOKEN,
-    /*"N"*/ NO_TOKEN,
-    /*"O"*/ NO_TOKEN,
-    /*"P"*/ NO_TOKEN,
-    /*"Q"*/ NO_TOKEN,
-    /*"R"*/ NO_TOKEN,
-    /*"S"*/ NO_TOKEN,
-    /*"T"*/ NO_TOKEN,
-    /*"U"*/ NO_TOKEN,
-    /*"V"*/ NO_TOKEN,
-    /*"W"*/ NO_TOKEN,
-    /*"X"*/ NO_TOKEN,
-    /*"Y"*/ NO_TOKEN,
-    /*"Z"*/ NO_TOKEN,
-    /*"["*/ NO_TOKEN,
-    /*"\"*/ NO_TOKEN,
-    /*"]"*/ NUMERIC_TOKEN,
-    /*"^"*/ NO_TOKEN,
-    /*"_"*/ NO_TOKEN,
-    /*"`"*/ NO_TOKEN,
-    /*"a"*/ NO_TOKEN,
-    /*"b"*/ NO_TOKEN,
-    /*"c"*/ NO_TOKEN,
-    /*"d"*/ NO_TOKEN,
-    /*"e"*/ NO_TOKEN,
-    /*"f"*/ NO_TOKEN,
-    /*"g"*/ NO_TOKEN,
-    /*"h"*/ NO_TOKEN,
-    /*"i"*/ NO_TOKEN,
-    /*"j"*/ NO_TOKEN,
-    /*"k"*/ NO_TOKEN,
-    /*"l"*/ NO_TOKEN,
-    /*"m"*/ NO_TOKEN,
-    /*"n"*/ NO_TOKEN,
-    /*"o"*/ NO_TOKEN,
-    /*"p"*/ NO_TOKEN,
-    /*"q"*/ NO_TOKEN,
-    /*"r"*/ NO_TOKEN,
-    /*"s"*/ NO_TOKEN,
-    /*"t"*/ NO_TOKEN,
-    /*"u"*/ NO_TOKEN,
-    /*"v"*/ NO_TOKEN,
-    /*"w"*/ NO_TOKEN,
-    /*"x"*/ NO_TOKEN,
-    /*"y"*/ NO_TOKEN,
-    /*"z"*/ NO_TOKEN,
-    /*"{"*/ NO_TOKEN,
-    /*"|"*/ NO_TOKEN,
-    /*"}"*/ NUMERIC_TOKEN,
-    /*"~"*/ NO_TOKEN,
-    /*DEL*/ NO_TOKEN,
-];
-
-pub(crate) global NUMERIC_CAPTURE_PUSH_TRANSCRIPT: [bool; 128] = [
-    /* NULL */ false,
-    /* SOH */ false,
-    /* TXT */ false,
-    /* ETX */ false,
-    /* EOT */ false,
-    /* ENQ */ false,
-    /* ACK */ false,
-    /* BEL */ false,
-    /* BS */ false,
-    /* TAB */ true,
-    /* NL */ true,
-    /* VT */ false,
-    /* FF */ false,
-    /* CR */ true,
-    /* SI */ false,
-    /* SO */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /* SPACE */ true,
-    /*"!"*/ false,
-    /* " */ true,
-    /* I THINK? */
-    /*"#"*/ false,
-    /*"$"*/ false,
-    /*"%"*/ false,
-    /*"&"*/ false,
-    /*"'"*/ false,
-    /*"("*/ false,
-    /*")"*/ false,
-    /*"*"*/ false,
-    /*"+"*/ false,
-    /*","*/ true,
-    /*"-"*/ false,
-    /*"."*/ false,
-    /*"/"*/ false,
-    /*"0"*/ false,
-    /* I THINK? */
-    /*"1"*/ false,
-    /* I THINK? */
-    /*"2"*/ false,
-    /* I THINK? */
-    /*"3"*/ false,
-    /* I THINK? */
-    /*"4"*/ false,
-    /* I THINK? */
-    /*"5"*/ false,
-    /* I THINK? */
-    /*"6"*/ false,
-    /* I THINK? */
-    /*"7"*/ false,
-    /* I THINK? */
-    /*"8"*/ false,
-    /* I THINK? */
-    /*"9"*/ false,
-    /* I THINK? */
-    /*":"*/ false,
-    /*";"*/ false,
-    /*"<"*/ false,
-    /*"="*/ false,
-    /*">"*/ false,
-    /*"?"*/ false,
-    /*"@"*/ false,
-    /*"A"*/ false,
-    /*"B"*/ false,
-    /*"C"*/ false,
-    /*"D"*/ false,
-    /*"E"*/ false,
-    /*"F"*/ false,
-    /*"G"*/ false,
-    /*"H"*/ false,
-    /*"I"*/ false,
-    /*"J"*/ false,
-    /*"K"*/ false,
-    /*"L"*/ false,
-    /*"M"*/ false,
-    /*"N"*/ false,
-    /*"O"*/ false,
-    /*"P"*/ false,
-    /*"Q"*/ false,
-    /*"R"*/ false,
-    /*"S"*/ false,
-    /*"T"*/ false,
-    /*"U"*/ false,
-    /*"V"*/ false,
-    /*"W"*/ false,
-    /*"X"*/ false,
-    /*"Y"*/ false,
-    /*"Z"*/ false,
-    /*"["*/ false,
-    /*"\"*/ false,
-    /*"]"*/ true,
-    /*"^"*/ false,
-    /*"_"*/ false,
-    /*"`"*/ false,
-    /*"a"*/ false,
-    /*"b"*/ false,
-    /*"c"*/ false,
-    /*"d"*/ false,
-    /*"e"*/ false,
-    /*"f"*/ false,
-    /*"g"*/ false,
-    /*"h"*/ false,
-    /*"i"*/ false,
-    /*"j"*/ false,
-    /*"k"*/ false,
-    /*"l"*/ false,
-    /*"m"*/ false,
-    /*"n"*/ false,
-    /*"o"*/ false,
-    /*"p"*/ false,
-    /*"q"*/ false,
-    /*"r"*/ false,
-    /*"s"*/ false,
-    /*"t"*/ false,
-    /*"u"*/ false,
-    /*"v"*/ false,
-    /*"w"*/ false,
-    /*"x"*/ false,
-    /*"y"*/ false,
-    /*"z"*/ false,
-    /*"{"*/ false,
-    /*"|"*/ false,
-    /*"}"*/ true,
-    /*"~"*/ false,
-    /*DEL*/ false,
-];
-
-pub(crate) global NUMERIC_CAPTURE_INCREASE_LENGTH: [bool; 128] = [
-    /* NULL */ false,
-    /* SOH */ false,
-    /* TXT */ false,
-    /* ETX */ false,
-    /* EOT */ false,
-    /* ENQ */ false,
-    /* ACK */ false,
-    /* BEL */ false,
-    /* BS */ false,
-    /* TAB */ false,
-    /* NL */ false,
-    /* VT */ false,
-    /* FF */ false,
-    /* CR */ false,
-    /* SI */ false,
-    /* SO */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /*  */ false,
-    /* SPACE */ false,
-    /*"!"*/ false,
-    /* " */ false,
-    /* I THINK? */
-    /*"#"*/ false,
-    /*"$"*/ false,
-    /*"%"*/ false,
-    /*"&"*/ false,
-    /*"'"*/ false,
-    /*"("*/ false,
-    /*")"*/ false,
-    /*"*"*/ false,
-    /*"+"*/ false,
-    /*","*/ false,
-    /*"-"*/ false,
-    /*"."*/ true,
-    /*"/"*/ false,
-    /*"0"*/ true,
-    /* I THINK? */
-    /*"1"*/ true,
-    /* I THINK? */
-    /*"2"*/ true,
-    /* I THINK? */
-    /*"3"*/ true,
-    /* I THINK? */
-    /*"4"*/ true,
-    /* I THINK? */
-    /*"5"*/ true,
-    /* I THINK? */
-    /*"6"*/ true,
-    /* I THINK? */
-    /*"7"*/ true,
-    /* I THINK? */
-    /*"8"*/ true,
-    /* I THINK? */
-    /*"9"*/ true,
-    /* I THINK? */
-    /*":"*/ false,
-    /*";"*/ false,
-    /*"<"*/ false,
-    /*"="*/ false,
-    /*">"*/ false,
-    /*"?"*/ false,
-    /*"@"*/ false,
-    /*"A"*/ false,
-    /*"B"*/ false,
-    /*"C"*/ false,
-    /*"D"*/ false,
-    /*"E"*/ false,
-    /*"F"*/ false,
-    /*"G"*/ false,
-    /*"H"*/ false,
-    /*"I"*/ false,
-    /*"J"*/ false,
-    /*"K"*/ false,
-    /*"L"*/ false,
-    /*"M"*/ false,
-    /*"N"*/ false,
-    /*"O"*/ false,
-    /*"P"*/ false,
-    /*"Q"*/ false,
-    /*"R"*/ false,
-    /*"S"*/ false,
-    /*"T"*/ false,
-    /*"U"*/ false,
-    /*"V"*/ false,
-    /*"W"*/ false,
-    /*"X"*/ false,
-    /*"Y"*/ false,
-    /*"Z"*/ false,
-    /*"["*/ false,
-    /*"\"*/ false,
-    /*"]"*/ false,
-    /*"^"*/ false,
-    /*"_"*/ false,
-    /*"`"*/ false,
-    /*"a"*/ false,
-    /*"b"*/ false,
-    /*"c"*/ false,
-    /*"d"*/ false,
-    /*"e"*/ false,
-    /*"f"*/ false,
-    /*"g"*/ false,
-    /*"h"*/ false,
-    /*"i"*/ false,
-    /*"j"*/ false,
-    /*"k"*/ false,
-    /*"l"*/ false,
-    /*"m"*/ false,
-    /*"n"*/ false,
-    /*"o"*/ false,
-    /*"p"*/ false,
-    /*"q"*/ false,
-    /*"r"*/ false,
-    /*"s"*/ false,
-    /*"t"*/ false,
-    /*"u"*/ false,
-    /*"v"*/ false,
-    /*"w"*/ false,
-    /*"x"*/ false,
-    /*"y"*/ false,
-    /*"z"*/ false,
-    /*"{"*/ false,
-    /*"|"*/ false,
-    /*"}"*/ false,
-    /*"~"*/ false,
-    /*DEL*/ false,
-];
-
 pub(crate) global LITERAL_CAPTURE_TOKEN: [u32; 128] = [
     /* NULL */ NO_TOKEN,
     /* SOH */ NO_TOKEN,
@@ -2496,139 +1942,8 @@ pub(crate) global STRING_CAPTURE_ERROR_FLAG: [bool; 128] = [
     /*DEL*/ true,
 ];
 
-pub(crate) global NUMERIC_CAPTURE_ERROR_FLAG: [bool; 128] = [
-    /* NULL */ true,
-    /* SOH */ true,
-    /* TXT */ true,
-    /* ETX */ true,
-    /* EOT */ true,
-    /* ENQ */ true,
-    /* ACK */ true,
-    /* BEL */ true,
-    /* BS */ true,
-    /* TAB */ false,
-    /* NL */ false,
-    /* VT */ true,
-    /* FF */ true,
-    /* CR */ false,
-    /* SI */ true,
-    /* SO */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /*  */ true,
-    /* SPACE */ false,
-    /*"!"*/ true,
-    /* " */ true,
-    /*"#"*/ true,
-    /*"$"*/ true,
-    /*"%"*/ true,
-    /*"&"*/ true,
-    /*"'"*/ true,
-    /*"("*/ true,
-    /*")"*/ true,
-    /*"*"*/ true,
-    /*"+"*/ true,
-    /*","*/ false,
-    /*"-"*/ true,
-    /*"."*/ false,
-    /*"/"*/ true,
-    /*"0"*/ false,
-    /*"1"*/ false,
-    /*"2"*/ false,
-    /*"3"*/ false,
-    /*"4"*/ false,
-    /*"5"*/ false,
-    /*"6"*/ false,
-    /*"7"*/ false,
-    /*"8"*/ false,
-    /*"9"*/ false,
-    /*":"*/ true,
-    /*";"*/ true,
-    /*"<"*/ true,
-    /*"="*/ true,
-    /*">"*/ true,
-    /*"?"*/ true,
-    /*"@"*/ true,
-    /*"A"*/ true,
-    /*"B"*/ true,
-    /*"C"*/ true,
-    /*"D"*/ true,
-    /*"E"*/ true,
-    /*"F"*/ true,
-    /*"G"*/ true,
-    /*"H"*/ true,
-    /*"I"*/ true,
-    /*"J"*/ true,
-    /*"K"*/ true,
-    /*"L"*/ true,
-    /*"M"*/ true,
-    /*"N"*/ true,
-    /*"O"*/ true,
-    /*"P"*/ true,
-    /*"Q"*/ true,
-    /*"R"*/ true,
-    /*"S"*/ true,
-    /*"T"*/ true,
-    /*"U"*/ true,
-    /*"V"*/ true,
-    /*"W"*/ true,
-    /*"X"*/ true,
-    /*"Y"*/ true,
-    /*"Z"*/ true,
-    /*"["*/ true,
-    /*"\"*/ true,
-    /*"]"*/ false,
-    /*"^"*/ true,
-    /*"_"*/ true,
-    /*"`"*/ true,
-    /*"a"*/ true,
-    /*"b"*/ true,
-    /*"c"*/ true,
-    /*"d"*/ true,
-    /*"e"*/ true,
-    /*"f"*/ true,
-    /*"g"*/ true,
-    /*"h"*/ true,
-    /*"i"*/ true,
-    /*"j"*/ true,
-    /*"k"*/ true,
-    /*"l"*/ true,
-    /*"m"*/ true,
-    /*"n"*/ true,
-    /*"o"*/ true,
-    /*"p"*/ true,
-    /*"q"*/ true,
-    /*"r"*/ true,
-    /*"s"*/ true,
-    /*"t"*/ true,
-    /*"u"*/ true,
-    /*"v"*/ true,
-    /*"w"*/ true,
-    /*"x"*/ true,
-    /*"y"*/ true,
-    /*"z"*/ true,
-    /*"{"*/ true,
-    /*"|"*/ true,
-    /*"}"*/ false,
-    /*"~"*/ true,
-    /*DEL*/ true,
-];
-
 // ============================================================================
-// The four extra numeric scan modes
+// The numeric scan modes
 // ============================================================================
 //
 // The original implementation has one `NUMERIC_CAPTURE` mode, so the number scanner is a byte
@@ -2636,22 +1951,35 @@ pub(crate) global NUMERIC_CAPTURE_ERROR_FLAG: [bool; 128] = [
 // "a digit MUST appear here" nor "the `.` has already been used". That is why
 // `1.`, `.5`, `01` and a bare `-` cannot be rejected by four modes alone.
 //
-// The parser adds `NUMERIC_MINUS`, `NUMERIC_ZERO`, `NUMERIC_DOT` and
-// `NUMERIC_FRAC`, which together with the existing `NUMERIC_CAPTURE` (integer
-// digits) make the scanner recognise exactly
+// Six more modes -- `NUMERIC_MINUS`, `NUMERIC_ZERO`, `NUMERIC_DOT`, `NUMERIC_FRAC`,
+// `NUMERIC_EXP`, `NUMERIC_EXP_SIGN`, `NUMERIC_EXP_DIGITS` -- together with the existing
+// `NUMERIC_CAPTURE` (integer digits) make the scanner recognise exactly
 //
-//     -? ( 0 | [1-9][0-9]* ) ( . [0-9]+ )?
+//     -? ( 0 | [1-9][0-9]* ) ( . [0-9]+ )? ( [eE] [+-]? [0-9]+ )?
 //
-//   GRAMMAR --'-'--> MINUS --'0'--> ZERO --'.'--> DOT --[0-9]--> FRAC
-//           --'0'------------------> ZERO         ^                |
-//           --[1-9]--> NUMERIC --[0-9]--> NUMERIC |                [0-9]
-//                          |                      |                v
-//                          +---------'.'----------+              FRAC
+//   GRAMMAR --'-'--> MINUS --'0'--> ZERO --'.'--> DOT --[0-9]--> FRAC --+
+//           --'0'------------------> ZERO         ^                     | [0-9]
+//           --[1-9]--> NUMERIC --[0-9]--> NUMERIC |                     +--> FRAC
+//                          |                      |
+//                          +---------'.'----------+
 //
-// Accepting states are ZERO, NUMERIC and FRAC: only there does a value
-// terminator close the token. In MINUS and DOT the terminators are errors, and
-// that is precisely how "a digit is mandatory here" is written down in a table
-// that only ever sees one byte at a time.
+//   ZERO, NUMERIC, FRAC --[eE]--> EXP --[+-]--> EXP_SIGN --[0-9]--> EXP_DIGITS --+
+//                                  |                                  ^          | [0-9]
+//                                  +--------------[0-9]---------------+          |
+//                                                 ^                              |
+//                                                 +------------------------------+
+//
+// Accepting states are ZERO, NUMERIC, FRAC and EXP_DIGITS: only there does a value
+// terminator close the token. In MINUS, DOT, EXP and EXP_SIGN the terminators are
+// errors, and that is precisely how "a digit is mandatory here" is written down in a
+// table that only ever sees one byte at a time.
+//
+// The exponent has no leading-zero rule (`1e05` is legal JSON, `01` is not), which is
+// why EXP_DIGITS cannot reuse NUMERIC/ZERO, and EXP_SIGN cannot reuse MINUS. Nor can EXP
+// and EXP_SIGN be merged: that would accept `1e+-5`.
+//
+// `get_number` reads u64s and rejects anything with a `.` or an `e` in it, so widening
+// the tokenizer does not widen what an integer getter will hand back.
 
 /// One row of a capture sub-table: the five parallel arrays that
 /// `make_json_capture_table` packs into a single `JSON_CAPTURE_TABLE` entry.
@@ -2670,14 +1998,15 @@ pub(crate) global NUMERIC_TERMINATORS: [u32; 7] = [9, 10, 13, 32, 44, 93, 125];
 
 /// Build a numeric scan-mode row.
 ///
-/// Every byte that is not a digit, a `.` or a terminator is an error inside a
-/// number, so a row is fully described by three transition targets plus one
-/// bit. Passing `ERROR_CAPTURE` as a target means "this byte is rejected in
+/// Every byte that is not a digit, a `.`, an `e`/`E` or a terminator is an error
+/// inside a number, so a row is fully described by four transition targets plus
+/// one bit. Passing `ERROR_CAPTURE` as a target means "this byte is rejected in
 /// this state" (that is how `NUMERIC_ZERO` forbids a second integer digit).
 pub(crate) unconstrained fn numeric_capture_row(
     on_zero: Field,
     on_one_to_nine: Field,
     on_dot: Field,
+    on_exponent: Field,
     may_end_here: bool,
 ) -> CaptureRow {
     let mut row = CaptureRow {
@@ -2705,6 +2034,16 @@ pub(crate) unconstrained fn numeric_capture_row(
         row.error_flag[46] = false;
     }
 
+    // "e" (101) and "E" (69) open the exponent, where that is allowed
+    if on_exponent != ERROR_CAPTURE {
+        row.capture[101] = on_exponent;
+        row.increase_length[101] = true;
+        row.error_flag[101] = false;
+        row.capture[69] = on_exponent;
+        row.increase_length[69] = true;
+        row.error_flag[69] = false;
+    }
+
     // a terminator closes the number: push a NUMERIC_TOKEN and go back to
     // grammar scanning. The terminator's own token (`,`, `}`, `]`) is recovered
     // afterwards by `capture_missing_tokens`.
@@ -2721,20 +2060,225 @@ pub(crate) unconstrained fn numeric_capture_row(
     row
 }
 
-/// The rows for capture modes 4..8, in mode order:
-/// `NUMERIC_MINUS`, `NUMERIC_ZERO`, `NUMERIC_DOT`, `NUMERIC_FRAC`.
-pub(crate) unconstrained fn extra_numeric_capture_rows() -> [CaptureRow; 4] {
+/// The eight numeric rows, in `CaptureMode` order: the four accepting states
+/// (`NUMERIC`, `ZERO`, `FRAC`, `EXP_DIGITS`) first, then the four that demand a
+/// byte (`MINUS`, `DOT`, `EXP`, `EXP_SIGN`), matching the ordering invariant in
+/// `CaptureMode`.
+pub(crate) unconstrained fn numeric_capture_rows() -> [CaptureRow; 8] {
     [
-        // after "-": a digit is mandatory, and it decides between 0 and 1..9
-        numeric_capture_row(NUMERIC_ZERO_CAPTURE, NUMERIC_CAPTURE, ERROR_CAPTURE, false),
-        // integer part is exactly "0": no second digit ("01" is not JSON), only
-        // a fraction or the end of the number
-        numeric_capture_row(ERROR_CAPTURE, ERROR_CAPTURE, NUMERIC_DOT_CAPTURE, true),
-        // after ".": a digit is mandatory ("1." is not JSON)
-        numeric_capture_row(NUMERIC_FRAC_CAPTURE, NUMERIC_FRAC_CAPTURE, ERROR_CAPTURE, false),
-        // fraction digits: no second "." ("1.2.3" is not JSON)
-        numeric_capture_row(NUMERIC_FRAC_CAPTURE, NUMERIC_FRAC_CAPTURE, ERROR_CAPTURE, true),
+        // NUMERIC: integer digits after a leading 1..9
+        numeric_capture_row(
+            NUMERIC_CAPTURE,
+            NUMERIC_CAPTURE,
+            NUMERIC_DOT_CAPTURE,
+            NUMERIC_EXP_CAPTURE,
+            true,
+        ),
+        // ZERO: the integer part is exactly "0". No second digit ("01" is not
+        // JSON), only a fraction, an exponent or the end of the number.
+        numeric_capture_row(
+            ERROR_CAPTURE,
+            ERROR_CAPTURE,
+            NUMERIC_DOT_CAPTURE,
+            NUMERIC_EXP_CAPTURE,
+            true,
+        ),
+        // FRAC: fraction digits. No second "." ("1.2.3" is not JSON).
+        numeric_capture_row(
+            NUMERIC_FRAC_CAPTURE,
+            NUMERIC_FRAC_CAPTURE,
+            ERROR_CAPTURE,
+            NUMERIC_EXP_CAPTURE,
+            true,
+        ),
+        // EXP_DIGITS: exponent digits. No "." and no second exponent.
+        numeric_capture_row(
+            NUMERIC_EXP_DIGITS_CAPTURE,
+            NUMERIC_EXP_DIGITS_CAPTURE,
+            ERROR_CAPTURE,
+            ERROR_CAPTURE,
+            true,
+        ),
+        // MINUS: after "-" a digit is mandatory, and it decides between 0 and 1..9
+        numeric_capture_row(
+            NUMERIC_ZERO_CAPTURE,
+            NUMERIC_CAPTURE,
+            ERROR_CAPTURE,
+            ERROR_CAPTURE,
+            false,
+        ),
+        // DOT: after "." a digit is mandatory ("1." is not JSON)
+        numeric_capture_row(
+            NUMERIC_FRAC_CAPTURE,
+            NUMERIC_FRAC_CAPTURE,
+            ERROR_CAPTURE,
+            ERROR_CAPTURE,
+            false,
+        ),
+        // EXP: after "e"/"E" a digit or a sign is mandatory. A leading zero is
+        // legal here, so both digit targets are the same state.
+        exponent_open_row(true),
+        // EXP_SIGN: after the exponent's sign a digit is mandatory, and a
+        // second sign is not.
+        exponent_open_row(false),
     ]
+}
+
+/// The two states that open an exponent. `allow_sign` separates "we have just
+/// seen `e`" (a `+`/`-` may still come) from "we have just seen the sign".
+unconstrained fn exponent_open_row(allow_sign: bool) -> CaptureRow {
+    let mut row = CaptureRow {
+        capture: [ERROR_CAPTURE; 128],
+        token: [NO_TOKEN; 128],
+        push_transcript: [false; 128],
+        increase_length: [false; 128],
+        error_flag: [true; 128],
+    };
+
+    for d in 0..10 {
+        row.capture[48 + d] = NUMERIC_EXP_DIGITS_CAPTURE;
+        row.increase_length[48 + d] = true;
+        row.error_flag[48 + d] = false;
+    }
+
+    if allow_sign {
+        // "+" (43) and "-" (45)
+        row.capture[43] = NUMERIC_EXP_SIGN_CAPTURE;
+        row.increase_length[43] = true;
+        row.error_flag[43] = false;
+        row.capture[45] = NUMERIC_EXP_SIGN_CAPTURE;
+        row.increase_length[45] = true;
+        row.error_flag[45] = false;
+    }
+
+    row
+}
+
+// ============================================================================
+// The five escape scan modes
+// ============================================================================
+//
+// The original implementation tracks escapes with a single "the previous byte was a
+// backslash" bit, which doubles `JSON_CAPTURE_TABLE` and buys exactly one thing: a `"`
+// straight after a `\` does not close the string. It cannot say *which* characters may
+// follow a backslash, and it cannot count, so `\q`, `\u12"` and `\u00zz` all parse.
+//
+// Five modes replace the bit and recognise
+//
+//     \ ( ["\/bfnrt] | u [0-9a-fA-F]{4} )
+//
+//   STRING --'\'--> ESCAPE --["\/bfnrt]--> STRING
+//                       |
+//                       +--'u'--> U1 --hex--> U2 --hex--> U3 --hex--> U4 --hex--> STRING
+//
+// None of the five is an accepting state: a string cannot close in the middle of an
+// escape, which is what the old bit could not express either way. Dropping the bit
+// halves the capture table, so the five modes are close to free -- see the note on
+// ordering in `CaptureMode`.
+//
+// This validates the *syntax* of an escape, not its meaning: `\uD800` unpaired is still
+// accepted, and `process_escape_sequences` still only unescapes a subset. Both are
+// stated in the README.
+
+/// `"` `\` `/` `b` `f` `n` `r` `t` continue the string; `u` opens `\uXXXX`.
+unconstrained fn string_escape_row() -> CaptureRow {
+    let mut row = CaptureRow {
+        capture: [ERROR_CAPTURE; 128],
+        token: [NO_TOKEN; 128],
+        push_transcript: [false; 128],
+        increase_length: [false; 128],
+        error_flag: [true; 128],
+    };
+
+    let simple: [u32; 8] = [34, 92, 47, 98, 102, 110, 114, 116];
+    for i in 0..simple.len() {
+        let b = simple[i];
+        row.capture[b] = STRING_CAPTURE;
+        row.increase_length[b] = true;
+        row.error_flag[b] = false;
+    }
+
+    // "u" (117)
+    row.capture[117] = STRING_UNICODE_1_CAPTURE;
+    row.increase_length[117] = true;
+    row.error_flag[117] = false;
+
+    row
+}
+
+/// One `\uXXXX` hex-digit position: only `[0-9a-fA-F]` may appear, and it moves
+/// to `next`.
+unconstrained fn unicode_escape_row(next: Field) -> CaptureRow {
+    let mut row = CaptureRow {
+        capture: [ERROR_CAPTURE; 128],
+        token: [NO_TOKEN; 128],
+        push_transcript: [false; 128],
+        increase_length: [false; 128],
+        error_flag: [true; 128],
+    };
+
+    for d in 0..10 {
+        row.capture[48 + d] = next;
+        row.increase_length[48 + d] = true;
+        row.error_flag[48 + d] = false;
+    }
+    for d in 0..6 {
+        // "A".."F" (65) and "a".."f" (97)
+        row.capture[65 + d] = next;
+        row.increase_length[65 + d] = true;
+        row.error_flag[65 + d] = false;
+        row.capture[97 + d] = next;
+        row.increase_length[97 + d] = true;
+        row.error_flag[97 + d] = false;
+    }
+
+    row
+}
+
+/// The five escape rows, in `CaptureMode` order: `STRING_ESCAPE`, then
+/// `STRING_UNICODE_1..4`.
+pub(crate) unconstrained fn escape_capture_rows() -> [CaptureRow; 5] {
+    [
+        string_escape_row(),
+        unicode_escape_row(STRING_UNICODE_2_CAPTURE),
+        unicode_escape_row(STRING_UNICODE_3_CAPTURE),
+        unicode_escape_row(STRING_UNICODE_4_CAPTURE),
+        unicode_escape_row(STRING_CAPTURE),
+    ]
+}
+
+/// The `STRING_CAPTURE` row, built from the hand-written sub-tables with two
+/// corrections.
+///
+/// * `\` (92) now opens `STRING_ESCAPE_CAPTURE` instead of staying in
+///   `STRING_CAPTURE`; the escape bit it used to set is gone.
+/// * TAB (9), LF (10) and CR (13) were string content. RFC 8259 forbids every
+///   byte below 0x20 raw inside a string -- they have to be escaped -- and every
+///   other control byte was already an error here. They were also the only three
+///   bytes whose `increase_length` disagreed with their `capture`, so a raw tab
+///   inside a string silently shortened the token it was part of.
+pub(crate) unconstrained fn string_capture_row() -> CaptureRow {
+    let mut row = CaptureRow {
+        capture: STRING_CAPTURE_TABLE,
+        token: STRING_CAPTURE_TOKEN,
+        push_transcript: STRING_CAPTURE_PUSH_TRANSCRIPT,
+        increase_length: STRING_CAPTURE_INCREASE_LENGTH,
+        error_flag: STRING_CAPTURE_ERROR_FLAG,
+    };
+
+    row.capture[92] = STRING_ESCAPE_CAPTURE;
+
+    let raw_control: [u32; 3] = [9, 10, 13];
+    for i in 0..raw_control.len() {
+        let b = raw_control[i];
+        row.capture[b] = ERROR_CAPTURE;
+        row.token[b] = NO_TOKEN;
+        row.push_transcript[b] = false;
+        row.increase_length[b] = false;
+        row.error_flag[b] = true;
+    }
+
+    row
 }
 
 pub(crate) global LITERAL_CAPTURE_ERROR_FLAG: [bool; 128] = [
