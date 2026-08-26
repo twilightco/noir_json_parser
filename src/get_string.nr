@@ -101,7 +101,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     /// returns an Option<BoundedVec> which will be null if the key does not exist
     ///
     /// the `StringBytes` parameter defines the maximum allowable length of the returned string
-    pub(crate) fn get_string<K, let StringBytes: u32>(
+    pub fn get_string<K, let StringBytes: u32>(
         self,
         key: K,
     ) -> Option<BoundedVec<u8, StringBytes>>
@@ -133,7 +133,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     /// will revert if the string does not exist
     ///
     /// the `StringBytes` parameter defines the maximum allowable length of the returned string
-    pub(crate) fn get_string_unchecked<let StringBytes: u32, K>(
+    pub fn get_string_unchecked<let StringBytes: u32, K>(
         self,
         key: K,
     ) -> BoundedVec<u8, StringBytes>
@@ -252,7 +252,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     /// will revert if the string does not exist
     ///
     /// the `StringBytes` parameter defines the maximum allowable length of the returned value
-    pub(crate) fn get_value_unchecked<let KeyBytes: u32, let StringBytes: u32, K>(
+    pub fn get_value_unchecked<let KeyBytes: u32, let StringBytes: u32, K>(
         self,
         key: K,
     ) -> JSONValue<StringBytes>
@@ -274,7 +274,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     /// returns an Option<JSONValue> which will be null if the key does not exist
     ///
     /// the `StringBytes` parameter defines the maximum allowable length of the returned value
-    pub(crate) fn get_value<K, let StringBytes: u32>(self, key: K) -> Option<JSONValue<StringBytes>>
+    pub fn get_value<K, let StringBytes: u32>(self, key: K) -> Option<JSONValue<StringBytes>>
     where
         K: KeyHashable,
     {

@@ -110,7 +110,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     }
 
     /// returns a bool that describes whether a given key exists at the root of the JSON
-    pub(crate) fn key_exists<K>(self, key: K) -> bool
+    pub fn key_exists<K>(self, key: K) -> bool
     where
         K: KeyHashable,
     {
@@ -180,7 +180,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         (search_result.found, search_result.lhs_index)
     }
 
-    pub(crate) fn get_keys_at_root<let MaxNumKeys: u32, let MaxKeyBytes: u32>(
+    pub fn get_keys_at_root<let MaxNumKeys: u32, let MaxKeyBytes: u32>(
         self,
     ) -> BoundedVec<BoundedVec<u8, MaxKeyBytes>, MaxNumKeys> {
         let root_object: JSONEntry =

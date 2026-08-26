@@ -10,27 +10,27 @@ global LITERAL_OFFSET_SHIFT: [Field; 6] =
 /// a JSON "literal" type has 3 states: "true", "false", "null".
 /// As such we can't directly convert to a bool and cover all possible cases
 pub struct JSONLiteral {
-    pub(crate) value: Field,
+    pub value: Field,
 }
 
 impl JSONLiteral {
-    pub(crate) fn new(is_true: bool, is_false: bool, is_null: bool) -> Self {
+    pub fn new(is_true: bool, is_false: bool, is_null: bool) -> Self {
         assert(
             is_false as Field + is_null as Field + is_true as Field == 1,
             "parse literal: invalid entry",
         );
         JSONLiteral { value: is_true as Field * 2 + is_null as Field }
     }
-    pub(crate) fn is_true(self) -> bool {
+    pub fn is_true(self) -> bool {
         self.value == 2
     }
-    pub(crate) fn is_null(self) -> bool {
+    pub fn is_null(self) -> bool {
         self.value == 1
     }
-    pub(crate) fn is_false(self) -> bool {
+    pub fn is_false(self) -> bool {
         self.value == 0
     }
-    pub(crate) fn to_bool(self) -> bool {
+    pub fn to_bool(self) -> bool {
         self.value == 2
     }
 }
@@ -64,7 +64,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     /// if the root JSON is an object, extract a literal value given by `key`
     ///
     /// returns an Option<JSONLiteral> which will be null if the literal does not exist
-    pub(crate) fn get_literal<K>(self, key: K) -> Option<JSONLiteral>
+    pub fn get_literal<K>(self, key: K) -> Option<JSONLiteral>
     where
         K: KeyHashable,
     {
@@ -85,7 +85,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     /// if the root JSON is an object, extract a literal value given by `key`
     ///
     /// will revert if the literal does not exist
-    pub(crate) fn get_literal_unchecked<K>(self, key: K) -> JSONLiteral
+    pub fn get_literal_unchecked<K>(self, key: K) -> JSONLiteral
     where
         K: KeyHashable,
     {

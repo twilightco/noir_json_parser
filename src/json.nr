@@ -21,18 +21,18 @@ use crate::utils::cast_num_to_u32;
  * @brief records a value in a json blob
  **/
 pub struct JSONValue<let MaxLength: u32> {
-    pub(crate) value: BoundedVec<u8, MaxLength>, // raw bytes that constitute the json value entry
-    pub(crate) value_type: Field, // either STRING_TOKEN, NUMERIC_TOKEN or LITERAL_TOKEN
+    pub value: BoundedVec<u8, MaxLength>, // raw bytes that constitute the json value entry
+    pub value_type: Field, // either STRING_TOKEN, NUMERIC_TOKEN or LITERAL_TOKEN
 }
 
 impl<let MaxLength: u32> JSONValue<MaxLength> {
-    fn is_string(self) -> bool {
+    pub fn is_string(self) -> bool {
         self.value_type == STRING_TOKEN as Field
     }
-    fn is_number(self) -> bool {
+    pub fn is_number(self) -> bool {
         self.value_type == NUMERIC_TOKEN as Field
     }
-    fn is_literal(self) -> bool {
+    pub fn is_literal(self) -> bool {
         self.value_type == LITERAL_TOKEN as Field
     }
 }
@@ -47,7 +47,7 @@ pub struct JSON<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u
     pub(crate) json_packed: [Field; NumPackedFields], // raw bytes, but packed into 31-byte Field elements
     pub(crate) raw_transcript: [Field; MaxNumTokens], // transcript of json tokens after basic processing
     pub(crate) transcript: [Field; MaxNumTokens], // complete transcript of json tokens
-    pub(crate) transcript_length: u32, // how big is the transcript?
+    pub transcript_length: u32, // how big is the transcript?
     pub(crate) key_data: [Field; MaxNumValues], // description of each key, packed into a Field element
     pub(crate) key_hashes: [Field; MaxNumValues], // a sorted list of key hashes
     pub(crate) unsorted_json_entries_packed: [JSONEntryPacked; MaxNumValues], // a list of all the processed json values (objects, arrays, numerics, literals, strings)
