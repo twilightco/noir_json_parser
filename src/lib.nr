@@ -24,6 +24,7 @@ use json::JSON;
 pub use get_literal::JSONLiteral;
 pub use getters::KeyHashable;
 pub use json::{JSON as JSONGeneric, JSONValue};
+pub use enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 
 pub type JSON512b = JSON<512, 20, 64, 33, 2>;
 pub type JSON1kb = JSON<1024, 37, 128, 65, 2>;

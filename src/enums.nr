@@ -58,7 +58,7 @@ pub(crate) mod Token {
     pub(crate) global NUM_TOKENS_MUL_2: u32 = 22;
 }
 
-pub(crate) mod Layer {
-    pub(crate) global OBJECT_LAYER: u32 = 0;
-    pub(crate) global ARRAY_LAYER: u32 = 1;
+pub mod Layer {
+    pub global OBJECT_LAYER: u32 = 0;
+    pub global ARRAY_LAYER: u32 = 1;
 }

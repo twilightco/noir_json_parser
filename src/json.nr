@@ -59,7 +59,7 @@ pub struct JSON<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u
     pub(crate) key_hashes: [Field; MaxNumValues], // a sorted list of key hashes
     pub(crate) unsorted_json_entries_packed: [JSONEntryPacked; MaxNumValues], // a list of all the processed json values (objects, arrays, numerics, literals, strings)
     pub(crate) json_entries_packed: [JSONEntryPacked; MaxNumValues], // a sorted list of all the processed json values (objects, arrays, numerics, literals, strings)
-    pub(crate) layer_type_of_root: u32, // is the root an OBJECT_LAYER, ARRAY_LAYER
+    pub layer_type_of_root: u32, // is the root an OBJECT_LAYER, ARRAY_LAYER
     pub(crate) root_id: Field, // the unique identifier of the root (if an object or array)
     pub(crate) root_index_in_transcript: u32, // location in json_entries_packed of the root
 }
