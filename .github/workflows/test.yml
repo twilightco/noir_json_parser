@@ -8,36 +8,16 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  MINIMUM_NOIR_VERSION: nightly-2026-04-08
+  # This fork pins its toolchain. The lookup tables and the error-state encoding depend
+  # on compiler behaviour (out-of-bounds reads as unsatisfiable constraints, brillig
+  # constraint checking), so "whatever nargo released this week" is not a test matrix we
+  # can read a green tick from.
+  NOIR_VERSION: 1.0.0-beta.26
 
 jobs:
-  noir-version-list:
-    name: Query supported Noir versions
-    runs-on: ubuntu-latest
-    outputs:
-      noir_versions: ${{ steps.get_versions.outputs.versions }}
-
-    steps:
-      - name: Checkout sources
-        id: get_versions
-        run: |
-          # gh returns the Noir releases in reverse chronological order so we keep all releases published after the minimum supported version.
-          VERSIONS=$(gh release list -R noir-lang/noir --exclude-pre-releases --json tagName -q 'map(.tagName) | index(env.MINIMUM_NOIR_VERSION) as $index | if $index then .[0:$index+1] else [env.MINIMUM_NOIR_VERSION] end')
-          echo "versions=$VERSIONS"
-          echo "versions=$VERSIONS" >> $GITHUB_OUTPUT
-        env:
-          GH_TOKEN: ${{ github.token }}
-
   test:
-    needs: [noir-version-list]
-    name: Test on Nargo ${{matrix.toolchain}}
+    name: Test on Nargo ${{ env.NOIR_VERSION }}
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: ${{ fromJson( needs.noir-version-list.outputs.noir_versions )}}
-        include:
-          - toolchain: nightly
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -45,10 +25,62 @@ jobs:
       - name: Install Nargo
         uses: noir-lang/noirup@v0.1.3
         with:
-          toolchain: ${{ matrix.toolchain }}
+          toolchain: ${{ env.NOIR_VERSION }}
 
       - name: Run Noir tests
         run: nargo test
+
+  soundness:
+    name: No unconstrained-value diagnostics
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Nargo
+        uses: noir-lang/noirup@v0.1.3
+        with:
+          toolchain: ${{ env.NOIR_VERSION }}
+
+      # `bug:` is the compiler telling us a value returned by an unconstrained function
+      # reaches a constrained context without being checked. The tree is clean of them
+      # and must stay that way: the fix is a constraint, never
+      # `--skip-brillig-constraints-check`.
+      - name: nargo check
+        run: |
+          set -o pipefail
+          nargo check 2>&1 | tee check.log
+          if grep -q '^bug:' check.log; then
+            echo "::error::nargo check reported a bug: diagnostic"
+            grep -A5 '^bug:' check.log
+            exit 1
+          fi
+
+  tables:
+    name: Lookup tables reproduce from their generators
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Nargo
+        uses: noir-lang/noirup@v0.1.3
+        with:
+          toolchain: ${{ env.NOIR_VERSION }}
+
+      # Two halves of the same claim. The verifiers check the committed tables against
+      # the sub-tables; the round trip checks that the emitters and the splicer still
+      # reproduce the committed file byte for byte, so a hand-edit of the generated file
+      # cannot pass by agreeing with itself.
+      - name: Verify committed tables
+        run: nargo test test_make
+
+      - name: Regenerate and diff
+        run: |
+          set -o pipefail
+          nargo test --show-output emit_table_ | grep '^EMIT ' > tables.txt
+          python3 scripts/splice_tables.py tables.txt src/json_tables.nr
+          git diff --exit-code -- src/json_tables.nr
 
   format:
     runs-on: ubuntu-latest
@@ -59,7 +91,7 @@ jobs:
       - name: Install Nargo
         uses: noir-lang/noirup@v0.1.3
         with:
-          toolchain: ${{ env.MINIMUM_NOIR_VERSION }}
+          toolchain: ${{ env.NOIR_VERSION }}
       - name: Run formatter
         run: nargo fmt --check
 
@@ -73,6 +105,8 @@ jobs:
     needs:
       - test
       - format
+      - soundness
+      - tables
 
     steps:
       - name: Report overall success
