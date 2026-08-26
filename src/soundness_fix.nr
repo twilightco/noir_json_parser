@@ -177,10 +177,7 @@ fn fix_two_limb_keys() {
     let json: JSON<91, 6, 32, 17, 2> = JSON::parse_json_from_string(
         "{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\":1,\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\":2}",
     );
-    assert(
-        json.key_exists("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".as_bytes()),
-        "40-byte key a",
-    );
+    assert(json.key_exists("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".as_bytes()), "40-byte key a");
     assert(
         json.get_number("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".as_bytes()).unwrap() == 2,
         "40-byte key b",

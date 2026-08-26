@@ -101,10 +101,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
     /// returns an Option<BoundedVec> which will be null if the key does not exist
     ///
     /// the `StringBytes` parameter defines the maximum allowable length of the returned string
-    pub fn get_string<K, let StringBytes: u32>(
-        self,
-        key: K,
-    ) -> Option<BoundedVec<u8, StringBytes>>
+    pub fn get_string<K, let StringBytes: u32>(self, key: K) -> Option<BoundedVec<u8, StringBytes>>
     where
         K: KeyHashable,
     {

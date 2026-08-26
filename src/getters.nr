@@ -388,8 +388,7 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         // Safety: `num_padding` only selects which adjacent pairs are checked. The
         // assert below pins the skipped prefix to entries with `parent_id == 0`, which
         // no key lookup can ever target, so a wrong hint cannot hide a duplicate key.
-        let num_padding =
-            unsafe { __count_non_key_entries::<MaxNumValues>(self.key_hashes) };
+        let num_padding = unsafe { __count_non_key_entries::<MaxNumValues>(self.key_hashes) };
         assert(num_padding != 0, "assert_no_duplicate_keys: empty padding prefix");
         assert_lt_240_bit(self.key_hashes[num_padding - 1], two_pow_216);
 

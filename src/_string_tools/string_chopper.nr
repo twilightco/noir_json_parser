@@ -51,17 +51,15 @@ fn test_slice_string_string_bytes_multiple_of_31() {
 #[test]
 fn test_slice_string_full_buffer_at_31_and_62() {
     let expected_31 = "abcdefghijklmnopqrstuvwxyz01234".as_bytes();
-    let json_31: crate::json::JSON<39, 5, 32, 17, 2> = crate::json::JSON::parse_json_from_string(
-        "{\"v\":\"abcdefghijklmnopqrstuvwxyz01234\"}",
-    );
+    let json_31: crate::json::JSON<39, 5, 32, 17, 2> =
+        crate::json::JSON::parse_json_from_string("{\"v\":\"abcdefghijklmnopqrstuvwxyz01234\"}");
     let v_31: BoundedVec<u8, 31> = json_31.get_string("v".as_bytes()).unwrap();
     assert(v_31.len() == 31, "31-byte value");
     for i in 0..31 {
         assert(v_31.get(i) == expected_31[i], "31-byte value, wrong byte");
     }
 
-    let expected_62 =
-        "abcdefghijklmnopqrstuvwxyz01234ABCDEFGHIJKLMNOPQRSTUVWXYZ56789".as_bytes();
+    let expected_62 = "abcdefghijklmnopqrstuvwxyz01234ABCDEFGHIJKLMNOPQRSTUVWXYZ56789".as_bytes();
     let json_62: crate::json::JSON<70, 6, 32, 17, 2> = crate::json::JSON::parse_json_from_string(
         "{\"v\":\"abcdefghijklmnopqrstuvwxyz01234ABCDEFGHIJKLMNOPQRSTUVWXYZ56789\"}",
     );
