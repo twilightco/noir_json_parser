@@ -18,12 +18,13 @@ pub fn lte_field_240_bit(x: Field, y: Field) -> bool {
     let predicate = unsafe { get_lte_predicate_large(x, y) };
     let delta = y as Field - x as Field;
 
-    // (x - y) * predicate
-    // if true, y - x >= 0
-    // if false, x <= y is wrong therefore x > y => x - y > 0 => x - y + 1 >= 0
-    // (y - x) * p + (1 - p) * (x - y + 1)
-    // (y - x) * p + x - y + 1 + p * (y - x)
-    let lt_parameter = 2 * (predicate as Field) * delta - predicate as Field - delta + 1;
+    // Select `y - x` when the predicate is true and `x - y - 1` when it is false.
+    // The selected value is non-negative exactly when the hint is correct:
+    //   p = 1 -> y - x     >= 0  <=>  x <= y
+    //   p = 0 -> x - y - 1 >= 0  <=>  x >  y
+    // Expanding the selector:
+    //   p * delta + (1 - p) * (-delta - 1) = 2 * p * delta - delta + p - 1
+    let lt_parameter = 2 * (predicate as Field) * delta - delta + predicate as Field - 1;
     // checks that the bit length of lt_parameter is 240
     // i.e. checks the sign of lt_parameter
     lt_parameter.assert_max_bit_size::<240>();
@@ -34,11 +35,7 @@ pub fn lte_field_240_bit(x: Field, y: Field) -> bool {
 pub fn assert_lte_240_bit(x: Field, y: Field) {
     let delta = y as Field - x as Field;
 
-    // (x - y) * predicate
-    // if true, y - x >= 0
-    // if false, x <= y is wrong therefore x > y => x - y > 0 => x - y + 1 >= 0
-    // (y - x) * p + (1 - p) * (x - y + 1)
-    // (y - x) * p + x - y + 1 + p * (y - x)
+    // no hint to check here: `x <= y` is exactly `y - x >= 0`
     delta.assert_max_bit_size::<240>();
 }
 
