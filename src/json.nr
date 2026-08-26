@@ -90,6 +90,22 @@ unconstrained fn __check_entry_ptr_bounds(entry_ptr: Field, max: u32) {
     assert(entry_ptr as u32 < max - 1, "create_json_entries: MaxNumValues limit exceeded!");
 }
 
+/// A `}` or `]` with nothing open pops the context stack below the root. `depth` reaches
+/// 0, and on the next transcript slot -- the first of the padding, on a document whose
+/// braces balance to one too many -- `depth - 1` becomes the field `-1`, so
+/// `cast_num_to_u32` fails its 32-bit range check and the whole message a caller gets is
+/// `call to assert_max_bit_size`, which names neither the document nor the problem.
+///
+/// A valid document leaves `depth == 1` (the root's own slot), so `depth == 0` here
+/// always means one closing brace or bracket too many.
+///
+/// The same idiom as `__check_entry_ptr_bounds` above: unconstrained, so it costs no
+/// gates, and it does not *have* to be sound -- the range check downstream is what
+/// actually rejects the document. This only decides which message the caller reads.
+unconstrained fn __check_stack_depth(depth: Field) {
+    assert(depth != 0, "create_json_entries: unbalanced closing brace or bracket");
+}
+
 impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let MaxNumValues: u32, let MaxKeyFields: u32> JSON<NumBytes, NumPackedFields, MaxNumTokens, MaxNumValues, MaxKeyFields> {
 
     /**
@@ -367,6 +383,8 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             // `previous_stack_entry` = Extract information about the parent of the current token
             // If the current token = END_OBJECT_TOKEN or END_ARRAY_TOKEN, previous_stack_entry = data that describes the object or array we are about to create
             // 9.5 gates
+            // Safety: diagnostic only -- `cast_num_to_u32` below is the constraint.
+            unsafe { __check_stack_depth(depth) };
             let depth_index: Field = (depth - 1);
             let previous_stack_entry_packed = parent_context_stack[cast_num_to_u32(depth_index)];
             let previous_stack_entry =
@@ -1874,4 +1892,39 @@ fn utf8_a_lone_high_byte_inside_a_string_is_accepted_unvalidated() {
 #[test(should_fail_with = "ScanData: Invalid token")]
 fn utf8_a_high_byte_outside_a_string_still_fails() {
     let _ = Utf8Json::parse_json(UTF8_HIGH_BYTE_OUTSIDE_STRING);
+}
+
+// ---------------------------------------------------------------------------
+// diagnostics
+// ---------------------------------------------------------------------------
+//
+// A rejected document should say what was wrong with it. Three of the four ways a
+// document can be refused already did; the fourth blew through the context stack and
+// surfaced as a range check on a negative number.
+
+#[test(should_fail_with = "create_json_entries: unbalanced closing brace or bracket")]
+fn diagnostic_names_an_extra_closing_brace() {
+    let _: JSON<32, 5, 16, 9, 2> = JSON::parse_json_from_string("{\"a\":1}}");
+}
+
+#[test(should_fail_with = "create_json_entries: unbalanced closing brace or bracket")]
+fn diagnostic_names_an_extra_closing_bracket() {
+    let _: JSON<32, 5, 16, 9, 2> = JSON::parse_json_from_string("[1,2]]");
+}
+
+#[test(should_fail_with = "ValidationFlags: grammar error")]
+fn diagnostic_names_an_unclosed_object() {
+    let _: JSON<32, 5, 16, 9, 2> = JSON::parse_json_from_string("{\"a\":1");
+}
+
+#[test(should_fail_with = "create_json_entries: MaxNumValues limit exceeded!")]
+fn diagnostic_names_an_exhausted_value_budget() {
+    let _: JSON<64, 6, 32, 4, 2> =
+        JSON::parse_json_from_string("{\"a\":1,\"b\":2,\"c\":3,\"d\":4,\"e\":5}");
+}
+
+#[test(should_fail_with = "build_transcript: MaxNumTokens limit exceeded!")]
+fn diagnostic_names_an_exhausted_token_budget() {
+    let _: JSON<64, 6, 6, 17, 2> =
+        JSON::parse_json_from_string("{\"a\":1,\"b\":2,\"c\":3,\"d\":4,\"e\":5}");
 }
