@@ -1,127 +1,252 @@
-# noir_json_parse
+# noir_json_parser
 
-A JSON parsing library for the Noir Language. This library adheres to the IETF RFC 8259 specifications (mostly, see [edge_cases](#edge_cases)).
+A JSON parsing library for the Noir language.
 
 Features:
 
-- handles _arbitrary-length_ JSON strings (up to a defined maximum bound)
-- flexible interface can process arbitrary JSON schemas
-- O(1) algorithms to query whether keys exist
+- handles _arbitrary-length_ JSON documents (up to a defined maximum bound)
+- a flexible interface that can process arbitrary JSON schemas
+- O(1) queries for whether a key exists
+
+> **This is a hardened fork.** It parses a stricter grammar than the original, closes six
+> soundness issues, and states its guarantees explicitly. Start with
+> [What a proof asserts](#what-a-proof-asserts).
 
 ## Noir version compatibility
 
-This library is tested with all Noir stable releases from v0.37.0.
+Developed and tested against `nargo` 1.0.0-beta.26.
 
-# Usage and Interface
+---
 
-Multiple JSON parser types are exposed that accomodate different maximum length parameters:
+## What a proof asserts
 
-> Notation explainer: a _token_ is a distinct JSON element, either `{` `}` `[` `]` `,` `:` , strings, numbers of literals (`false`, `true`, `null`)
-> Notation explainer: a _value_ is an object, array, string, number of literal
+> These bytes are a syntactically valid JSON document, and the values read out of it by
+> the getters the circuit called are the values that document contains.
 
-- `JSON512b` a parser that can handle up to 512 bytes of JSON, up to 64 _tokens_ and 32 _values_
-- `JSON1kb` a parser that can handle up to 1kb of JSON, up to 128 _tokens_ and 64 _values_
-- `JSON2kb` a parser that can handle up to 2kb bytes of JSON, up to 256 _tokens_ and 128 _values_
-- `JSON4kb` a parser that can handle up to 4kb bytes of JSON, up to 512 _tokens_ and 256 _values_
-- `JSON8kb` a parser that can handle up to 8kb bytes of JSON, up to 1,024 _tokens_ and 512 _values_
-- `JSON16kb` a parser that can handle up to 16kb bytes of JSON, up to 2,048 _tokens_ and 1,024 _values_
+Three things it deliberately does **not** assert. Read these before relying on the
+library — each one is a decision, and each one is somebody's job further up.
 
-The maximum length of keys in the JSON blob is _62 bytes_. All of these parameters are configurable, see [Advanced usage](#advanced-usage) for more info.
+**It does not assert the bytes are text.** Bytes ≥ 0x80 are opaque inside strings and
+keys: an overlong encoding, a truncated sequence or a lone surrogate all parse, and
+`get_string` hands back the raw bytes. The circuit attests bytes and JSON structure, not
+UTF-8. This is on purpose. In the setting this fork exists for, the bytes arrive over TLS
+and the prover cannot choose them, so malformed UTF-8 is not an attack — it is a question
+of what the verifier is promised. Validating the whole document would also make one bad
+byte in a field nobody reads sink the entire proof. Where well-formedness matters, check
+it on the values you actually compare.
+
+**It does not assert keys are unique.** `{"a":1,"a":2}` parses. `assert_no_duplicate_keys`
+exists, is sound and is cheap, but it is a method you call — not part of `parse_json`.
+
+**It does not assert a string has been decoded.** `get_string` replaces seven escape
+sequences (`\"` `\\` `\b` `\f` `\n` `\r` `\t`). `\/` and `\uXXXX` are validated as syntax
+but come back as the raw bytes that spell them, and surrogate pairs are not paired. If
+you compare decoded text, either finish the decoding or refuse strings containing a
+backslash.
+
+---
+
+## What changed against the original
+
+### Soundness
+
+Six issues, each one commit with its own tests:
+
+- `lte_field_240_bit` had the wrong false branch — it evaluated to zero when
+  `y == x + 1`, so a prover could claim `x > y` for any two adjacent values.
+- The root entry was checked but not counted: a second parentless entry could sit in the
+  map, and the prover chose which one the verifier saw.
+- Container identities were neither bounded nor unique, so an entry could be re-parented.
+- A child pointer written twice carried into `num_children`, which is what every array
+  bounds check compares against.
+- The transcript past its logical length was unconstrained.
+- Keys longer than `MaxKeyFields * 31` were silently truncated into the capacity, so two
+  keys sharing a 62-byte prefix shared a hash. The 62-byte key that *is* representable
+  parsed and then aborted on lookup — an off-by-one, not a real limit.
+
+The key lookup itself, `get_keys_at_root`, the `get_array` type check and
+`assert_no_duplicate_keys` were fixed earlier on this fork; the attacks that motivated
+them are in the audit.
+
+### Grammar
+
+The tokenizer is a 16-mode byte automaton where the original had four modes and a
+single "the previous byte was a backslash" bit.
+
+- **Numbers** are RFC 8259's `number`:
+  `-? ( 0 | [1-9][0-9]* ) ( \. [0-9]+ )? ( [eE] [+-]? [0-9]+ )?`. Negatives, decimals and
+  exponents parse; `1.`, `.5`, `01`, `1e`, `1e++2` and `1.2.3` are rejected inside
+  `parse_json`, not deferred to a getter.
+- **Escapes** are validated: `\ ( ["\\/bfnrt] | u [0-9a-fA-F]{4} )`. `\q`, `\u12` and
+  `\u00zz` used to parse.
+- **Raw control bytes** below 0x20 are rejected inside strings, as RFC 8259 requires.
+  TAB, LF and CR were previously string content — and a raw TAB also silently shortened
+  the token it was part of.
+- **Bytes ≥ 0x80** are accepted as opaque string and key content. The original made them
+  an error in every mode, so a single accented letter anywhere made a document
+  unparseable. See [What a proof asserts](#what-a-proof-asserts) for what this does and
+  does not promise.
+- **Literals past byte 255** of the document parse (an 8-bit bound on a 16-bit index).
+
+### API
+
+- `get_value_from_array` returns an element of any type, with `value_type` saying which.
+  It used to assert `STRING_TOKEN`, which made a number inside an array unreadable:
+  `get_number_from_array` was the only door and it rejects decimals. `JSONValue` gains
+  `is_object` and `is_array`.
+- `get_string_from_path` and `get_value_from_path` resolve each segment against the node
+  the previous one returned. They used to look every segment up in the root, so anything
+  deeper than two segments never resolved.
+- The getters are `pub` (several were `pub(crate)` by accident), and
+  `layer_type_of_root` — with `OBJECT_LAYER` / `ARRAY_LAYER` — is public, so a caller can
+  derive the shape of a document from the parse rather than from a constant it carries.
+- Entry-level helpers (`adapter_entry_at`, `adapter_key_exists_at`, …) for callers whose
+  query shape is only known at witness time.
+- `get_number` rejects any byte that is not a digit and range-checks to 64 bits.
+  `99999999999999999999` used to come back as `7766279631452241919`.
+- `StringBytes` may be a multiple of 31.
+
+### Diagnostics
+
+Every rejection path now says what was wrong. `{"a":1}}` used to surface as
+`call to assert_max_bit_size` on a negative number, deep inside the context stack; an
+undersized `NumPackedFields` used to surface as `Index out of bounds` inside the string
+tools. Each message is pinned by a test.
+
+---
 
 ## Usage
 
-```
-use crate::json_parser::JSON1kb;
-use crate::json_parser::JSONLiteral;
+```rust
+use json_parser::JSON1kb;
+use json_parser::JSONLiteral;
+
 /*
-example schema. In this example we require every field to exist except "dlc_enabled", which is optional.
-We also demonstrate escaped strings. To escape a string in JSON, we must escape the escape characters in noir!
 {
     "hero": "Tony Harrison",
     "is_player": false,
     "stats": [
-        {
-            "hero_quote": "\\\"This is an outrage!\\\"",
-            "power_level": 1
-        },
-        {
-            "hero_quote": "\"The Crunch? You know nothing of the crunch!\"",
-            "power_level": 9001
-        }
+        { "hero_quote": "\"This is an outrage!\"", "power_level": 1 },
+        { "hero_quote": "\"You know nothing of the crunch!\"", "power_level": 9001 }
     ],
     "dlc_enabled": true
 }
 */
-fn process_schema(text: [u8; NUM_BYTES])
-{
-    let json: JSON = JSON::parse_json(text);
+fn process_schema(text: [u8; 1024]) {
+    let json: JSON1kb = JSON1kb::parse_json(text);
 
-    // we use the "unchecked" method because we want to assert this field exists
-    let hero_name: BoundedVec<u8, 20> = json.get_string_unchecked("hero".as_array());
-    assert(hero_name == BoundedVec::from_array("Tony Harrison".to_array()));
+    // reject a record that repeats a key -- not implied by `parse_json`
+    json.assert_no_duplicate_keys();
 
-    // json literals can be "null", which doesn't map perfectly to a bool, so we use a custom type
-    let is_player: JSONLiteral = json.get_literal_unchecked("is_player".as_array());
-    let is_player = is_player.to_bool(); // can cast to bool if you don't mind null mapping to false
+    // "unchecked" asserts the field exists
+    let hero: BoundedVec<u8, 20> = json.get_string_unchecked("hero".as_bytes());
+    assert(hero == BoundedVec::from_array("Tony Harrison".as_bytes()));
 
-    // to move into a nested object or array, call `get_object` or `get_array`
-    let stats_array: JSON = json.get_array_unchecked("stats".as_array());
-    let stats: [JSON; 2] = [stats.get_object_as_array_unchecked(0), stats.get_object_as_array_unchecked(1)];
+    // a literal can be `null`, which does not map onto a bool, hence the custom type
+    let is_player: JSONLiteral = json.get_literal_unchecked("is_player".as_bytes());
+    let _is_player = is_player.to_bool(); // null maps to false
 
-    let hero_quote: BoundedVec<u8, 30> = stats[0].get_string_unchecked("hero_quote".as_array());
-    assert(hero_quote == BoundedVec::from_array("\"This is an outrage!\"".as_array()));
+    // descend with get_object / get_array
+    let stats = json.get_array_unchecked("stats".as_bytes());
+    let first = stats.get_object_from_array_unchecked(0);
 
-    let power_levels: [u64; 2] = [
-        stats[0].get_number_unchecked("power_level"),
-        stats[1].get_number_unchecked("power_level"),
-    ];
-    assert(power_levels[1] > power_levels[0]);
+    let power: u64 = first.get_number_unchecked("power_level".as_bytes());
+    assert(power == 1);
 
-    // All getter methods have a basic version that returns the element as an Option,
-    // to support cases where a field may or may not exist
-    let dlc_enabled: Option<JSONLiteral> = json.get_literal("dlc_enabled");
-
-    let has_dlc_field = dlc_enabled.is_some();
+    // every getter has a version returning an Option, for fields that may not exist
+    let dlc: Option<JSONLiteral> = json.get_literal("dlc_enabled".as_bytes());
+    assert(dlc.is_some());
 }
 ```
 
-# Edge Cases
+Decimals, negatives and exponents are read as raw bytes through `get_value`, whose
+`value_type` is `NUMERIC_TOKEN`; `get_number` is for plain unsigned integers and refuses
+the rest.
 
-### single value JSON
+---
 
-1. A single value is a valid JSON schema but is not currently supported.
+## Sizing a `JSON` type
 
-i.e. `let json: JSON = JSON::parse_json("9999")` will fail
+```rust
+JSONGeneric<NumBytes, NumPackedFields, MaxNumTokens, MaxNumValues, MaxKeyFields>
+```
 
-### no support for floating point or scientific notation numbers
+> A _token_ is a distinct JSON element: `{` `}` `[` `]` `,` `:`, a string, a number or a
+> literal. A _value_ is an object, array, string, number or literal.
 
-Numbers must currently fit within a u64 for `get_number` and associated methods to work.
-In addition, numbers with decimal points currently are not supported, as well as numbers that use scientific notation (e.g. a json blob with `3e5` will create a failing proof)
+Two of the five follow from `NumBytes`:
 
-For numbers larger than 64 bits, the method `get_value` will work, which will return the ascii raw bytes of the value.
+- `NumPackedFields >= ceil(NumBytes / 31) + 3`. The `+ 3` is not slack you may reclaim:
+  `slice_fields` reads one limb past the end of the slice it is asked for. `parse_json`
+  asserts the requirement, at no gate cost.
+- `MaxKeyFields` is a choice about keys, not size. At the default of 2 a key may be up to
+  **62 bytes**; a longer key is rejected during the parse.
 
-# Advanced Usage
+The other two are a property of the **shape** of your documents, not their length. The
+aliases below assume a token every 8 bytes and a value every 16 — roughly what
+pretty-printed JSON with long string values looks like. Dense records are nothing like
+that: `{"a":1,"b":2,...}` is a token every 3.5 bytes, so a real 511-byte record with 83
+tokens does not fit in `JSON512b`, which stops at 64. It fails cleanly, but it fails. The
+reverse costs money instead of proofs: `MaxNumValues` dominates the key map and the sort,
+so an alias four times wider than your records pays for all four.
 
-### Fine-grained maximum parameter control
+**Count the tokens in a real record, add the margin you want to declare, and name the
+parameters.** Use an alias only once you have checked your documents fit it.
 
-If the predefined JSON types are not sufficient for your use case, you can define a JSON object with a custom parameterization:
+| alias | bytes | tokens | values |
+| --- | ---: | ---: | ---: |
+| `JSON512b` | 512 | 64 | 32 |
+| `JSON1kb` | 1,024 | 128 | 64 |
+| `JSON2kb` | 2,048 | 256 | 128 |
+| `JSON4kb` | 4,096 | 512 | 256 |
+| `JSON8kb` | 8,192 | 1,024 | 512 |
+| `JSON16kb` | 16,384 | 2,048 | 1,024 |
 
-The JSON struct in `dep::json_parser::json::JSON` is parameterized with the following parameters:
+### Keys of unknown length
 
-`struct JSON<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let MaxNumValues: u32, let MaxKeyFields: u32>`
+Every query method accepts the key as a `BoundedVec`, for keys derived in-circuit.
 
-- `NumBytes` : the maximum size of the initial json blob
-- `NumPackedFields` : take `NumBytes / 31`, round up to the nearest integer, then add 3!
-- `MaxNumTokens`: the maximum number of tokens in the json blob
-- `MaxNumValues`: the maximum number of values in the json blob _plus one_
-- `MaxKeyFields`: the largest size a key can take (in bytes) equals `MaxKeyFields * 31`
+---
 
-e.g. to take the existing 1kb JSON parameters, but also support 124-byte keys, use `JSON<1024, 37, 128, 65, 4>`
+## Remaining limitations
 
-### Making queries with keys of unknown length
+- **A single value is not a document here.** `JSON::parse_json("9999")` fails; the root
+  must be an object or an array.
+- **`get_number` is for `u64`.** Decimals, negatives, exponents and values above
+  `u64::MAX` are refused. Read them with `get_value` and parse the bytes yourself.
+- **UTF-8 and escape decoding**, as above.
 
-If you are deriving a key to look up in-circuit and you do not know the maximum length of the key, all query methods accept the key as a `BoundedVec`
+---
 
-# Acknowledgements
+## Development
 
-Many thanks to the authors of the OG noir json library https://github.com/RontoSOFT/noir-json-parser
+```sh
+nargo test                # the suite
+nargo test mutations::    # the mutation suite alone
+nargo check               # must be clean of `bug:` diagnostics
+nargo test test_make      # the committed tables match their generators
+```
+
+`src/json_tables.nr` is generated. Never hand-edit it — change the sub-tables in
+`src/_table_generation/` and regenerate:
+
+```sh
+nargo test --show-output emit_table_ | grep '^EMIT ' > /tmp/tables.txt
+python3 scripts/splice_tables.py /tmp/tables.txt src/json_tables.nr
+nargo test test_make
+```
+
+Growing a table is a chicken-and-egg problem: the `test_make*` verifiers will not compile
+while the sizes disagree. Resize the global to the new length with placeholder `0x00`
+entries first, then emit and splice.
+
+Two invariants hold the table layout and are checked by tests: `ERROR_CAPTURE` must stay
+one past the last real scan mode (a rejected byte is expressed as a lookup past the end
+of `JSON_CAPTURE_TABLE`), and every mode that can close a token must sort below
+`NUM_PUSHING_CAPTURE_MODES` (`ASCII_TO_TOKEN_TABLE` and `PROCESS_RAW_TRANSCRIPT_TABLE`
+are sized to those modes alone).
+
+## Acknowledgements
+
+Many thanks to the authors of the original Noir JSON library
+https://github.com/RontoSOFT/noir-json-parser

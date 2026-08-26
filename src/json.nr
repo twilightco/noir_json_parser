@@ -1928,3 +1928,30 @@ fn diagnostic_names_an_exhausted_token_budget() {
     let _: JSON<64, 6, 6, 17, 2> =
         JSON::parse_json_from_string("{\"a\":1,\"b\":2,\"c\":3,\"d\":4,\"e\":5}");
 }
+
+/// The example in the README, compiled. Documentation that does not build is a lie with
+/// extra steps.
+#[test]
+fn readme_example_compiles_and_runs() {
+    let text = "{\"hero\":\"Tony Harrison\",\"is_player\":false,\"stats\":[{\"hero_quote\":\"a\",\"power_level\":1},{\"hero_quote\":\"b\",\"power_level\":9001}],\"dlc_enabled\":true}";
+    let mut buffer: [u8; 1024] = [32; 1024];
+    for i in 0..text.as_bytes().len() {
+        buffer[i] = text.as_bytes()[i];
+    }
+
+    let json: crate::JSON1kb = crate::JSON1kb::parse_json(buffer);
+    json.assert_no_duplicate_keys();
+
+    let hero: BoundedVec<u8, 20> = json.get_string_unchecked("hero".as_bytes());
+    assert(hero == BoundedVec::from_array("Tony Harrison".as_bytes()));
+
+    let is_player: JSONLiteral = json.get_literal_unchecked("is_player".as_bytes());
+    assert(is_player.to_bool() == false);
+
+    let stats = json.get_array_unchecked("stats".as_bytes());
+    let first = stats.get_object_from_array_unchecked(0);
+    assert(first.get_number_unchecked("power_level".as_bytes()) == 1);
+
+    let dlc: Option<JSONLiteral> = json.get_literal("dlc_enabled".as_bytes());
+    assert(dlc.is_some());
+}

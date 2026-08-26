@@ -335,3 +335,106 @@ fn keys_differing_in_the_last_byte_at_capacity_do_not_collide() {
     assert(json.get_number_unchecked(a) == 1, "a");
     assert(json.get_number_unchecked(b) == 2, "b");
 }
+
+// ---------------------------------------------------------------------------------
+// the range the sort comparator is only correct inside
+// ---------------------------------------------------------------------------------
+//
+// `noir_sort::sort_advanced` gives two guarantees: `sorted` is a permutation of the
+// input (`get_shuffle_indices` asserts, for every i, that some slot holds i -- a
+// surjection of a finite set onto itself, so a bijection -- and that
+// `rhs[indices[i]] == lhs[i]`), and `assert_lte_240_bit` holds on every adjacent pair.
+//
+// The second one only *orders* anything while the values stay well below the field
+// modulus. `assert_lte_240_bit(x, y)` checks that `y - x` fits in 240 bits; for
+// x, y < 2^240 a negative difference wraps to about 2^254 and does not fit, so the check
+// means `x <= y` as integers. That is the whole argument, and it rests on a range
+// nothing in `noir_sort` enforces.
+//
+// It holds here by construction: an entry is a 200-bit hash, plus a 16-bit array index
+// at 2^200, plus a 16-bit parent identity at 2^216, so it is under 2^232. This test is
+// that argument, checked against a real record rather than asserted in prose.
+
+#[test]
+fn key_hashes_stay_inside_the_comparator_range() {
+    let json = record();
+    for i in 0..17 {
+        json.key_hashes[i].assert_max_bit_size::<232>();
+    }
+}
+
+#[test]
+fn key_hashes_of_a_nested_record_stay_inside_the_comparator_range() {
+    let json: JSON<128, 8, 48, 25, 2> = JSON::parse_json_from_string(
+        "{\"a\":[1,2,3],\"b\":{\"c\":{\"d\":\"x\"}},\"e\":true,\"f\":-1.5e3}",
+    );
+    for i in 0..25 {
+        json.key_hashes[i].assert_max_bit_size::<232>();
+    }
+}
+
+// ---------------------------------------------------------------------------------
+// unescaping
+// ---------------------------------------------------------------------------------
+//
+// `process_escape_sequences` runs over the raw bytes of a string token and replaces
+// two-byte escapes with one byte. It handles seven of them -- `\" \\ \b \f \n \r \t` --
+// and nothing else: `\/` and `\uXXXX` are *syntax* the tokenizer now validates, but they
+// come back through `get_string` as the raw bytes that spell them. A caller that needs
+// the decoded text has to finish the job, or refuse strings containing a backslash.
+//
+// The one thing worth checking closely is the `skip` flag, which is what stops an
+// escaped backslash from swallowing the character after it.
+
+type UnescapeJson = JSON<48, 5, 16, 9, 2>;
+
+#[test]
+fn unescape_replaces_the_seven_it_knows() {
+    let json: UnescapeJson = JSON::parse_json_from_string("{\"a\":\"x\\ny\"}");
+    let v: BoundedVec<u8, 16> = json.get_string("a".as_bytes()).unwrap();
+    assert_eq(v.len(), 3);
+    assert_eq(v.get(1), 10); // LF, not the two bytes that spelled it
+}
+
+/// `"\\n"` is an escaped backslash followed by the letter `n`, not an escaped newline.
+/// Getting this wrong is a one-character change in `process_escape_sequences` and it
+/// would let a string claim a byte the document does not contain.
+#[test]
+fn unescape_does_not_chain_an_escaped_backslash_into_the_next_character() {
+    let json: UnescapeJson = JSON::parse_json_from_string("{\"a\":\"\\\\n\"}");
+    let v: BoundedVec<u8, 16> = json.get_string("a".as_bytes()).unwrap();
+    assert_eq(v.len(), 2);
+    assert_eq(v.get(0), 92); // backslash
+    assert_eq(v.get(1), 110); // "n"
+}
+
+/// ...and two escaped backslashes in a row are two backslashes.
+#[test]
+fn unescape_handles_consecutive_escaped_backslashes() {
+    let json: UnescapeJson = JSON::parse_json_from_string("{\"a\":\"\\\\\\\\\"}");
+    let v: BoundedVec<u8, 16> = json.get_string("a".as_bytes()).unwrap();
+    assert_eq(v.len(), 2);
+    assert_eq(v.get(0), 92);
+    assert_eq(v.get(1), 92);
+}
+
+/// `\/` is legal JSON and the tokenizer accepts it, but the unescaper does not know it:
+/// the two bytes come back as they are. Documented, not fixed -- see the README.
+#[test]
+fn unescape_leaves_a_solidus_escape_alone() {
+    let json: UnescapeJson = JSON::parse_json_from_string("{\"a\":\"\\/\"}");
+    let v: BoundedVec<u8, 16> = json.get_string("a".as_bytes()).unwrap();
+    assert_eq(v.len(), 2);
+    assert_eq(v.get(0), 92);
+    assert_eq(v.get(1), 47);
+}
+
+/// Same for `\uXXXX`: six bytes in, six bytes out.
+#[test]
+fn unescape_leaves_a_unicode_escape_alone() {
+    let json: UnescapeJson = JSON::parse_json_from_string("{\"a\":\"\\u00e9\"}");
+    let v: BoundedVec<u8, 16> = json.get_string("a".as_bytes()).unwrap();
+    assert_eq(v.len(), 6);
+    assert_eq(v.get(0), 92);
+    assert_eq(v.get(1), 117); // "u"
+}
