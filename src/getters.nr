@@ -435,6 +435,237 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
 
         (entry, valid, cast_num_to_u32(entry_index))
     }
+
+    // Entry-level helpers for callers whose query shape is known only at
+    // witness time. Such callers need
+    //
+    //   * ONE lookup that hands back the entry and lets the caller decide what
+    //     its `entry_type` means, instead of `get_string` / `get_number` /
+    //     `get_object` / `get_array` each asserting their own
+    //     (`adapter_entry_under` + `adapter_value_bytes`);
+    //   * a lookup under an EXPLICIT parent identity, so `a.b` does not have to
+    //     materialise a child `JSON` and mux the whole struct -- the identity
+    //     of the object found at `a` is its `entry.id`, which is precisely what
+    //     `get_object` would have written into `root_id`;
+    //   * the root shape taken from the parse instead of a compile-time global
+    //     (`adapter_effective_root`), which a generic attestor cannot have;
+    //   * the raw sorted key-hash list, for the one predicate the O(1) lookup
+    //     cannot express -- "every occurrence of this key at ANY depth"
+    //     (`adapter_key_hashes` + `adapter_entry_at`);
+    //   * a key hash taken from limbs the caller already holds
+    //     (`adapter_keyhash_of_limbs`).
+    // -----------------------------------------------------------------------
+
+    /// 200-bit key hash of a key already packed into `MaxKeyFields` limbs of 31
+    /// big-endian bytes each.
+    ///
+    /// Identical by construction to `KeyHashable::get_keyhash` on the same
+    /// bytes: all three trait impls end in this same
+    /// `Poseidon2::hash(limbs, MaxKeyFields)` + `slice_200_bits_from_field`.
+    /// It is offered separately because `get_keyhash_var` re-derives the limbs
+    /// with `31 * MaxKeyFields` reads at witness-dependent indices, work a
+    /// caller whose key already sits in a fixed, zero-padded buffer does not
+    /// need to pay.
+    pub fn adapter_keyhash_of_limbs(self, limbs: [Field; MaxKeyFields]) -> Field {
+        let _ = self;
+        let hashed = poseidon::poseidon2::Poseidon2::hash(limbs, MaxKeyFields);
+        crate::_string_tools::slice_field::slice_200_bits_from_field(hashed)
+    }
+
+    /// `key_exists_impl`, with the lookup target supplied by the caller.
+    ///
+    /// The body below is the body of `key_exists_impl` from the point where the
+    /// target is known: the same three not-found bindings added by the
+    /// soundness fix, the same two 240-bit comparisons, the same return. Only
+    /// the head differs -- the original builds the target as
+    /// `key.get_keyhash() + self.root_id * 2^216`, this one receives it. Read
+    /// the invariant written above those bindings in `key_exists_impl`: nothing
+    /// in it depends on where the high bits came from, because `root_id` was
+    /// never more to that proof than "the high 16 bits of the target".
+    ///
+    /// PRECONDITION: `target < 2^232`. Every target this crate builds satisfies
+    /// it (a 200-bit hash plus a 16-bit identity at 2^216), and it is what
+    /// makes the two 240-bit comparisons order integers rather than wrap.
+    pub fn adapter_key_exists_at(self, target: Field) -> (bool, u32) {
+        let HASH_MAXIMUM = 0x1000000000000000000000000000000000000000000000000000000000000 - 1;
+        target.assert_max_bit_size::<232>();
+
+        // Safety: exactly as in `key_exists_impl` -- the asserts below bind
+        // every field of the returned witness to the sorted list.
+        let search_result =
+            unsafe { search_for_key_in_map::<MaxNumValues>(self.key_hashes, target) };
+        if search_result.found {
+            assert_eq(search_result.lhs_index, search_result.rhs_index);
+        }
+
+        let found = search_result.found as Field;
+        let target_lt_smallest_entry = search_result.target_lt_smallest_entry;
+        let target_gt_largest_entry = search_result.target_gt_largest_entry;
+
+        let exclusion_test =
+            found + (target_gt_largest_entry as Field) + (target_lt_smallest_entry as Field);
+        exclusion_test.assert_max_bit_size::<1>();
+
+        let middle = 1 - exclusion_test;
+        let lhs_index_f = search_result.lhs_index as Field;
+        let rhs_index_f = search_result.rhs_index as Field;
+        assert(
+            middle * (rhs_index_f - lhs_index_f - 1) == 0,
+            "key_exists: not-found witness entries are not adjacent",
+        );
+        assert(
+            (target_lt_smallest_entry as Field) * rhs_index_f == 0,
+            "key_exists: target_lt_smallest_entry must point at index 0",
+        );
+        assert(
+            (target_gt_largest_entry as Field) * (lhs_index_f - (MaxNumValues as Field - 1)) == 0,
+            "key_exists: target_gt_largest_entry must point at the last index",
+        );
+
+        let lhs = self.key_hashes[search_result.lhs_index];
+        let mut lhs = if target_lt_smallest_entry { 0 } else { lhs };
+
+        let rhs = self.key_hashes[search_result.rhs_index];
+        let mut rhs = if target_gt_largest_entry {
+            HASH_MAXIMUM
+        } else {
+            rhs
+        };
+
+        lhs -= found;
+        rhs += found;
+
+        assert_gt_240_bit(target, lhs);
+        assert_lt_240_bit(target, rhs);
+
+        (search_result.found, search_result.lhs_index)
+    }
+
+    /// One lookup, raw and untyped:
+    /// `(exists, entry_type, id, num_children, json_pointer, json_length)` for
+    /// the entry that `keyhash` names inside the object whose identity is
+    /// `parent_id`.
+    ///
+    /// No type assertion, deliberately. `get_object` / `get_array` /
+    /// `get_string` / `get_number` each assert their own `entry_type`, which is
+    /// what a caller with a witness-shaped predicate cannot afford: it would
+    /// have to call every one of them. The type comes back as a value instead,
+    /// and the caller asserts the one its predicate asked for.
+    ///
+    /// PRECONDITION: `keyhash < 2^200` and `parent_id < 2^16`, so that the
+    /// target stays inside the bound `adapter_key_exists_at` documents. Both
+    /// hold for the values this crate hands out -- `adapter_keyhash_of_limbs`
+    /// and `KeyHashable` end in `slice_200_bits_from_field`, and `JSONEntry.id`
+    /// is range checked to 16 bits by `JSONEntry::from_field`.
+    pub fn adapter_entry_under(
+        self,
+        parent_id: Field,
+        keyhash: Field,
+    ) -> (bool, Field, Field, Field, Field, Field) {
+        let two_pow_216 = 0x100000000000000000000000000000000000000000000000000000000;
+        let (exists, key_index) = self.adapter_key_exists_at(keyhash + parent_id * two_pow_216);
+        let entry: JSONEntry = self.json_entries_packed[key_index].into();
+        (
+            exists, entry.entry_type, entry.id, entry.num_children, entry.json_pointer,
+            entry.json_length,
+        )
+    }
+
+    /// The entry at `index` of the sorted entry list, as
+    /// `(entry_type, num_children, json_pointer, json_length)`.
+    ///
+    /// Index-aligned with `adapter_key_hashes`: entry `i` is the value whose
+    /// key hashes to `key_hashes[i]`. That alignment is not new -- the whole of
+    /// `get_json_entry_unchecked_with_key_index` rests on it.
+    pub fn adapter_entry_at(self, index: u32) -> (Field, Field, Field, Field) {
+        let entry: JSONEntry = self.json_entries_packed[index].into();
+        (entry.entry_type, entry.num_children, entry.json_pointer, entry.json_length)
+    }
+
+    /// The type, identity and parent identity of the entry at `index`, i.e.
+    /// `(entry_type, id, parent_index)`.
+    ///
+    /// A cheaper partial decode than `adapter_entry_at`: it goes through
+    /// `extract_entry_type_id_and_parent_index_from_field` (three 16-bit range
+    /// checks and one recomposition) instead of unpacking all eight members.
+    /// A caller that walks the whole list -- to answer "is the parent of this
+    /// entry an object or an array?", which nothing else in the crate can say
+    /// -- pays that once per slot and nothing more.
+    pub fn adapter_entry_type_id_parent(self, index: u32) -> (Field, Field, Field) {
+        let (id, parent_index, entry_type) = JSONEntry::extract_entry_type_id_and_parent_index_from_field(
+            self.json_entries_packed[index].value,
+        );
+        (entry_type, id, parent_index)
+    }
+
+    /// The sorted key-hash list. Element `i` is
+    /// `keyhash + array_index * 2^200 + parent_id * 2^216` (`keymap.nr`), so a
+    /// caller that decomposes it can ask "which entries carry THIS key,
+    /// whatever their parent" -- a question the O(1) lookup cannot pose,
+    /// because the parent identity is part of the thing being matched.
+    pub fn adapter_key_hashes(self) -> [Field; MaxNumValues] {
+        self.key_hashes
+    }
+
+    /// Raw bytes of a value, from the pointer/length pair of its entry. Same
+    /// path `get_value` takes, without the `Option` and without the type
+    /// dispatch: `extract_string_entry` still asserts
+    /// `json_length <= StringBytes`, so an over-long value fails closed rather
+    /// than truncating.
+    pub fn adapter_value_bytes<let StringBytes: u32>(
+        self,
+        json_pointer: Field,
+        json_length: Field,
+    ) -> [u8; StringBytes] {
+        let mut entry = JSONEntry::new();
+        entry.json_pointer = json_pointer;
+        entry.json_length = json_length;
+        self.extract_string_entry(entry)
+    }
+
+    /// The identity of the object that a root-level key resolves against,
+    /// DERIVED FROM THE PARSE: the document root when it is an object, and the
+    /// single element of the root array when it is an array.
+    ///
+    /// `get_length` and
+    /// `key_exists` assert instead of answering, and `layer_type_of_root` is
+    /// `pub(crate)`, so a caller had to know the shape at compile time -- fine
+    /// for one provider, not for an attestor over arbitrary endpoints. The two
+    /// asserts are the shape policy: an array root must hold exactly one
+    /// element and that element must be an object.
+    pub fn adapter_effective_root(self) -> Field {
+        let root_entry: JSONEntry = self.json_entries_packed[self.root_index_in_transcript].into();
+        let is_array = root_entry.entry_type == crate::enums::Token::END_ARRAY_TOKEN as Field;
+
+        // Read unconditionally so the branch muxes one Field instead of two
+        // array reads; when the root is an object the value is discarded.
+        let child: JSONEntry =
+            self.json_entries_packed[cast_num_to_u32(root_entry.child_pointer)].into();
+
+        if is_array {
+            assert(
+                root_entry.num_children == 1,
+                "adapter_effective_root: root array must hold exactly one element",
+            );
+            assert_eq(
+                child.entry_type,
+                crate::enums::Token::END_OBJECT_TOKEN as Field,
+                "adapter_effective_root: root array element must be an object",
+            );
+        } else {
+            assert_eq(
+                root_entry.entry_type,
+                crate::enums::Token::END_OBJECT_TOKEN as Field,
+                "adapter_effective_root: root must be an object or an array",
+            );
+        }
+
+        if is_array {
+            child.id
+        } else {
+            self.root_id
+        }
+    }
 }
 
 unconstrained fn find_key_in_map<let MaxNumValues: u32>(
