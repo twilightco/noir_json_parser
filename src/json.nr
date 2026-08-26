@@ -785,6 +785,17 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
 
     pub fn parse_json<let StringBytes: u32>(stringbytes: [u8; StringBytes]) -> Self {
         assert(StringBytes <= NumBytes, "json length exceeds NumBytes!");
+        // `slice_fields` reads one limb past the end of the slice it is asked for (the
+        // read is discarded, but it still has to be in bounds), and the string getters
+        // slice up to `StringBytes` bytes from any position. Both are why the packed
+        // buffer carries slack over the `ceil(NumBytes / 31)` limbs the bytes need.
+        // Getting this wrong shows up as `Index out of bounds` inside
+        // `_string_tools/slice_packed_field.nr`, which says nothing about the alias that
+        // caused it -- so say it here. Constant, so it costs no gates.
+        assert(
+            NumPackedFields >= (NumBytes + 30) / 31 + 3,
+            "NumPackedFields too small: it must be at least ceil(NumBytes / 31) + 3",
+        );
         let mut text: [u8; NumBytes] = [0; NumBytes];
         for i in 0..StringBytes {
             text[i] = stringbytes[i];
@@ -960,7 +971,7 @@ fn literal_past_byte_255_document() -> [u8; 268] {
 }
 
 #[test]
-fn literal_literal_past_byte_255_parses() {
+fn literal_past_byte_255_parses() {
     let json: JSON<268, 12, 32, 17, 2> = JSON::parse_json(literal_past_byte_255_document());
     assert(json.get_literal_unchecked("b".as_bytes()).is_true());
 }
