@@ -1,5 +1,6 @@
 use crate::enums::CaptureMode::{
-    ERROR_CAPTURE, GRAMMAR_CAPTURE, LITERAL_CAPTURE, NUMERIC_CAPTURE, STRING_CAPTURE,
+    ERROR_CAPTURE, GRAMMAR_CAPTURE, LITERAL_CAPTURE, NUMERIC_CAPTURE, NUMERIC_DOT_CAPTURE,
+    NUMERIC_FRAC_CAPTURE, NUMERIC_MINUS_CAPTURE, NUMERIC_ZERO_CAPTURE, STRING_CAPTURE,
 };
 use crate::enums::Token::{
     BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, END_ARRAY_TOKEN, END_OBJECT_TOKEN, KEY_SEPARATOR_TOKEN,
@@ -54,10 +55,10 @@ pub(crate) global GRAMMAR_CAPTURE_TABLE: [Field; 128] = [
     /*"*"*/ ERROR_CAPTURE,
     /*"+"*/ ERROR_CAPTURE,
     /*","*/ GRAMMAR_CAPTURE,
-    /*"-"*/ ERROR_CAPTURE,
+    /*"-"*/ NUMERIC_MINUS_CAPTURE,
     /*"."*/ ERROR_CAPTURE,
     /*"/"*/ ERROR_CAPTURE,
-    /*"0"*/ NUMERIC_CAPTURE,
+    /*"0"*/ NUMERIC_ZERO_CAPTURE,
     /*"1"*/ NUMERIC_CAPTURE,
     /*"2"*/ NUMERIC_CAPTURE,
     /*"3"*/ NUMERIC_CAPTURE,
@@ -320,7 +321,7 @@ pub(crate) global NUMERIC_CAPTURE_TABLE: [Field; 128] = [
     /*"+"*/ ERROR_CAPTURE,
     /*","*/ GRAMMAR_CAPTURE,
     /*"-"*/ ERROR_CAPTURE,
-    /*"."*/ ERROR_CAPTURE,
+    /*"."*/ NUMERIC_DOT_CAPTURE,
     /*"/"*/ ERROR_CAPTURE,
     /*"0"*/ NUMERIC_CAPTURE,
     /*"1"*/ NUMERIC_CAPTURE,
@@ -866,7 +867,7 @@ pub(crate) global GRAMMAR_CAPTURE_INCREASE_LENGTH: [bool; 128] = [
     /*"*"*/ false,
     /*"+"*/ false,
     /*","*/ false,
-    /*"-"*/ false,
+    /*"-"*/ true,
     /*"."*/ false,
     /*"/"*/ false,
     /*"0"*/ true,
@@ -1719,7 +1720,7 @@ pub(crate) global NUMERIC_CAPTURE_INCREASE_LENGTH: [bool; 128] = [
     /*"+"*/ false,
     /*","*/ false,
     /*"-"*/ false,
-    /*"."*/ false,
+    /*"."*/ true,
     /*"/"*/ false,
     /*"0"*/ true,
     /* I THINK? */
@@ -2276,7 +2277,7 @@ pub(crate) global GRAMMAR_CAPTURE_ERROR_FLAG: [bool; 128] = [
     /*"*"*/ true,
     /*"+"*/ true,
     /*","*/ false,
-    /*"-"*/ true,
+    /*"-"*/ false,
     /*"."*/ true,
     /*"/"*/ true,
     /*"0"*/ false,
@@ -2542,7 +2543,7 @@ pub(crate) global NUMERIC_CAPTURE_ERROR_FLAG: [bool; 128] = [
     /*"+"*/ true,
     /*","*/ false,
     /*"-"*/ true,
-    /*"."*/ true,
+    /*"."*/ false,
     /*"/"*/ true,
     /*"0"*/ false,
     /*"1"*/ false,
@@ -2625,6 +2626,116 @@ pub(crate) global NUMERIC_CAPTURE_ERROR_FLAG: [bool; 128] = [
     /*"~"*/ true,
     /*DEL*/ true,
 ];
+
+// ============================================================================
+// The four extra numeric scan modes
+// ============================================================================
+//
+// The original implementation has one `NUMERIC_CAPTURE` mode, so the number scanner is a byte
+// classifier, not an automaton: it can say "a digit may appear here" but not
+// "a digit MUST appear here" nor "the `.` has already been used". That is why
+// `1.`, `.5`, `01` and a bare `-` cannot be rejected by four modes alone.
+//
+// The parser adds `NUMERIC_MINUS`, `NUMERIC_ZERO`, `NUMERIC_DOT` and
+// `NUMERIC_FRAC`, which together with the existing `NUMERIC_CAPTURE` (integer
+// digits) make the scanner recognise exactly
+//
+//     -? ( 0 | [1-9][0-9]* ) ( . [0-9]+ )?
+//
+//   GRAMMAR --'-'--> MINUS --'0'--> ZERO --'.'--> DOT --[0-9]--> FRAC
+//           --'0'------------------> ZERO         ^                |
+//           --[1-9]--> NUMERIC --[0-9]--> NUMERIC |                [0-9]
+//                          |                      |                v
+//                          +---------'.'----------+              FRAC
+//
+// Accepting states are ZERO, NUMERIC and FRAC: only there does a value
+// terminator close the token. In MINUS and DOT the terminators are errors, and
+// that is precisely how "a digit is mandatory here" is written down in a table
+// that only ever sees one byte at a time.
+
+/// One row of a capture sub-table: the five parallel arrays that
+/// `make_json_capture_table` packs into a single `JSON_CAPTURE_TABLE` entry.
+pub(crate) struct CaptureRow {
+    pub(crate) capture: [Field; 128],
+    pub(crate) token: [u32; 128],
+    pub(crate) push_transcript: [bool; 128],
+    pub(crate) increase_length: [bool; 128],
+    pub(crate) error_flag: [bool; 128],
+}
+
+/// The bytes that legally close a number: TAB, LF, CR, SPACE, `,`, `]`, `}`.
+/// Same set the original implementation uses in `NUMERIC_CAPTURE_TABLE`; note that `:` and `"` are
+/// deliberately NOT in it, so `{"a":1:2}` and `{"a":1"}` stay errors.
+pub(crate) global NUMERIC_TERMINATORS: [u32; 7] = [9, 10, 13, 32, 44, 93, 125];
+
+/// Build a numeric scan-mode row.
+///
+/// Every byte that is not a digit, a `.` or a terminator is an error inside a
+/// number, so a row is fully described by three transition targets plus one
+/// bit. Passing `ERROR_CAPTURE` as a target means "this byte is rejected in
+/// this state" (that is how `NUMERIC_ZERO` forbids a second integer digit).
+pub(crate) unconstrained fn numeric_capture_row(
+    on_zero: Field,
+    on_one_to_nine: Field,
+    on_dot: Field,
+    may_end_here: bool,
+) -> CaptureRow {
+    let mut row = CaptureRow {
+        capture: [ERROR_CAPTURE; 128],
+        token: [NO_TOKEN; 128],
+        push_transcript: [false; 128],
+        increase_length: [false; 128],
+        error_flag: [true; 128],
+    };
+
+    // digits stay inside the number and extend the token being scanned
+    for d in 0..10 {
+        let target = if d == 0 { on_zero } else { on_one_to_nine };
+        if target != ERROR_CAPTURE {
+            row.capture[48 + d] = target;
+            row.increase_length[48 + d] = true;
+            row.error_flag[48 + d] = false;
+        }
+    }
+
+    // "." (46) opens the fraction, where that is allowed
+    if on_dot != ERROR_CAPTURE {
+        row.capture[46] = on_dot;
+        row.increase_length[46] = true;
+        row.error_flag[46] = false;
+    }
+
+    // a terminator closes the number: push a NUMERIC_TOKEN and go back to
+    // grammar scanning. The terminator's own token (`,`, `}`, `]`) is recovered
+    // afterwards by `capture_missing_tokens`.
+    if may_end_here {
+        for i in 0..NUMERIC_TERMINATORS.len() {
+            let t = NUMERIC_TERMINATORS[i];
+            row.capture[t] = GRAMMAR_CAPTURE;
+            row.token[t] = NUMERIC_TOKEN;
+            row.push_transcript[t] = true;
+            row.error_flag[t] = false;
+        }
+    }
+
+    row
+}
+
+/// The rows for capture modes 4..8, in mode order:
+/// `NUMERIC_MINUS`, `NUMERIC_ZERO`, `NUMERIC_DOT`, `NUMERIC_FRAC`.
+pub(crate) unconstrained fn extra_numeric_capture_rows() -> [CaptureRow; 4] {
+    [
+        // after "-": a digit is mandatory, and it decides between 0 and 1..9
+        numeric_capture_row(NUMERIC_ZERO_CAPTURE, NUMERIC_CAPTURE, ERROR_CAPTURE, false),
+        // integer part is exactly "0": no second digit ("01" is not JSON), only
+        // a fraction or the end of the number
+        numeric_capture_row(ERROR_CAPTURE, ERROR_CAPTURE, NUMERIC_DOT_CAPTURE, true),
+        // after ".": a digit is mandatory ("1." is not JSON)
+        numeric_capture_row(NUMERIC_FRAC_CAPTURE, NUMERIC_FRAC_CAPTURE, ERROR_CAPTURE, false),
+        // fraction digits: no second "." ("1.2.3" is not JSON)
+        numeric_capture_row(NUMERIC_FRAC_CAPTURE, NUMERIC_FRAC_CAPTURE, ERROR_CAPTURE, true),
+    ]
+}
 
 pub(crate) global LITERAL_CAPTURE_ERROR_FLAG: [bool; 128] = [
     /* NULL */ true,

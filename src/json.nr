@@ -1,5 +1,5 @@
 use crate::_comparison_tools::bounds_checker::get_validity_flags;
-use crate::enums::CaptureMode::GRAMMAR_CAPTURE;
+use crate::enums::CaptureMode::{CAPTURE_TABLE_HALF, GRAMMAR_CAPTURE};
 use crate::enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 use crate::enums::Token::{
     BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, KEY_SEPARATOR_TOKEN, KEY_TOKEN, LITERAL_TOKEN,
@@ -567,7 +567,8 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             let ascii = self.json[i];
 
             // 1 gate
-            let encoded_ascii = previous_was_potential_escape_sequence as Field * 1024
+            let encoded_ascii = previous_was_potential_escape_sequence as Field
+                * CAPTURE_TABLE_HALF as Field
                 + scan_mode * 256
                 + ascii as Field;
             std::as_witness(encoded_ascii);
@@ -608,10 +609,18 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             scan_mode = scan_token;
         }
 
-        // we encode error flag into the scan_token value, which must be less than 4
-        // the lookup into JSON_CAPTURE_TABLE applies an implicit 2-bit range check on `scan_token`
+        // we encode error flag into the scan_token value, which must be less than 8
+        // the lookup into JSON_CAPTURE_TABLE applies an implicit range check on `scan_token`
         // however this does not get triggered if the final byte scanned produces an error state
         length.assert_max_bit_size::<2>();
+        // ...and `length` is not what guards that case: an error
+        // entry is `ERROR_CAPTURE + error * 0x100000000`, and `ScanData::from_field`
+        // only asserts `scan_token + flags == f`, with `scan_token` unrestricted.
+        // A prover can therefore absorb the error bit into `scan_token`. For every
+        // byte but the last, the next `JSON_CAPTURE_TABLE` lookup then blows past
+        // `cast_num_to_u32`; for the last byte nothing did. 1 gate closes it, and
+        // it is the constraint the parser's mode encoding relies on.
+        scan_mode.assert_max_bit_size::<3>();
 
         JSON {
             json: self.json,
@@ -792,7 +801,8 @@ unconstrained fn __build_transcript<let NumBytes: u32, let MaxNumTokens: u32>(
         assert(transcript_ptr < MaxNumTokens, "build_transcript: MaxNumTokens limit exceeded!");
         let ascii = json_array[i];
 
-        let encoded_ascii = previous_was_potential_escape_sequence as Field * 1024
+        let encoded_ascii = previous_was_potential_escape_sequence as Field
+            * CAPTURE_TABLE_HALF as Field
             + scan_mode * 256
             + ascii as Field;
         let ScanData { scan_token, push_transcript, increase_length, is_potential_escape_sequence }
@@ -823,7 +833,9 @@ unconstrained fn __build_transcript<let NumBytes: u32, let MaxNumTokens: u32>(
     );
 
     // ensure an error isn't hiding in the last scanned token
-    scan_mode.assert_max_bit_size::<2>();
+    // 3 bits, not 2: there are 8 scan modes now (`ERROR_CAPTURE`
+    // is 8, so it does not fit and is still caught here)
+    scan_mode.assert_max_bit_size::<3>();
     raw_transcript
 }
 
@@ -1169,4 +1181,204 @@ fn test_invalid_literal_3() {
 fn test_invalid_literal_4() {
     let text = "{ \"hello \", \"world\" n}";
     let _: JSON<26, 10, 20, 20, 2> = JSON::parse_json_from_string(text);
+}
+
+// ============================================================================
+// number grammar: decimals and negatives
+// ============================================================================
+//
+// The scanner recognises `-? ( 0 | [1-9][0-9]* ) ( . [0-9]+ )?`. Everything the
+// grammar rejects is rejected *inside* `parse_json`, in the tokenizer, with
+// `ScanData: Invalid token` -- not deferred to a getter. The exponent is out of
+// scope and stays an error.
+//
+// `get_value` returns the raw bytes and `value_type == NUMERIC_TOKEN`, so a
+// decimal and an integer are indistinguishable by type: a reader that wants a
+// u64 must use `get_number`, which rejects `.` and `-` (see get_number.nr).
+
+/// 32 bytes covers every case below; `NumPackedFields = ceil(32/31) + 3 = 5`.
+type NumberJson = JSON<32, 5, 16, 9, 2>;
+
+/// assert that key "a" holds a numeric token whose raw bytes are `expected`
+fn number_value_is<let N: u32>(json: NumberJson, expected: [u8; N]) {
+    let v: JSONValue<16> = json.get_value("a".as_bytes()).unwrap();
+    assert(v.is_number(), "number: value_type is not NUMERIC_TOKEN");
+    assert(v.value.len() == N, "number: wrong token length");
+    for i in 0..N {
+        assert(v.value.get(i) == expected[i], "number: wrong token byte");
+    }
+}
+
+#[test]
+fn number_accepts_leading_zero_decimal() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":0.5}");
+    number_value_is(json, "0.5".as_bytes());
+}
+
+#[test]
+fn number_accepts_one_digit_decimal() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":9.6}");
+    number_value_is(json, "9.6".as_bytes());
+}
+
+#[test]
+fn number_accepts_trailing_zeros_in_fraction() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":10.00}");
+    number_value_is(json, "10.00".as_bytes());
+}
+
+#[test]
+fn number_accepts_eight_decimals() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":1.12345678}");
+    number_value_is(json, "1.12345678".as_bytes());
+}
+
+#[test]
+fn number_accepts_negative_integer() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":-3}");
+    number_value_is(json, "-3".as_bytes());
+}
+
+#[test]
+fn number_accepts_negative_zero() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":-0}");
+    number_value_is(json, "-0".as_bytes());
+}
+
+#[test]
+fn number_accepts_negative_decimal() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":-1.5}");
+    number_value_is(json, "-1.5".as_bytes());
+}
+
+#[test]
+fn number_accepts_plain_zero() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":0}");
+    number_value_is(json, "0".as_bytes());
+}
+
+#[test]
+fn number_accepts_negative_zero_decimal() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":-0.0}");
+    number_value_is(json, "-0.0".as_bytes());
+}
+
+#[test]
+fn number_accepts_a_decimal_inside_an_array() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":[-1.5,0.5]}");
+    let inner = json.get_array_unchecked("a".as_bytes());
+    assert(inner.get_length() == 2);
+}
+
+/// The original implementation quirk, unrelated to the parser but in the way of reading decimals out
+/// of an array: `get_value_from_array` asserts `STRING_TOKEN` (get_string.nr:308)
+/// while `get_value` asserts nothing. So the raw bytes of a *number* inside an
+/// array cannot be read at all -- `get_number_from_array` is the only door, and
+/// it rejects decimals. F4 has to descend with `get_object_from_array` or
+/// widen this getter.
+#[test(should_fail_with = "get_array_element_as_string: entry exists but is not a string!")]
+fn number_array_element_raw_bytes_are_unreachable_for_numbers() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":[-1.5,0.5]}");
+    let inner = json.get_array_unchecked("a".as_bytes());
+    let _: JSONValue<16> = inner.get_value_from_array_unchecked(0);
+}
+
+#[test]
+fn number_still_accepts_a_quoted_decimal_as_a_string() {
+    let json: NumberJson = JSON::parse_json_from_string("{\"a\":\"1.5\"}");
+    let v: JSONValue<16> = json.get_value("a".as_bytes()).unwrap();
+    assert(v.is_string());
+    assert(v.value.len() == 3);
+}
+
+// --- rejected by the tokenizer ---------------------------------------------
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_trailing_dot() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1.}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_leading_dot() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":.5}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_leading_zero_integer() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":01}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_leading_zero_decimal() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":01.5}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_double_zero() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":00}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_bare_minus() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":-}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_double_minus() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":--1}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_minus_after_digits() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1-2}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_second_dot() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1.2.3}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_dot_after_fraction_start() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1..2}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_unary_plus() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":+1}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_exponent_lowercase() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1e5}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_exponent_uppercase() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1E5}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_negative_exponent() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1.5E-3}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_double_plus_exponent() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1e++2}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_a_minus_that_is_not_at_the_head() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1.-5}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_a_dot_after_a_minus() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":-.5}");
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn number_rejects_a_number_followed_by_a_key_separator() {
+    let _: NumberJson = JSON::parse_json_from_string("{\"a\":1:2}");
 }

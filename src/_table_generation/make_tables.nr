@@ -1,5 +1,5 @@
 //! Contains methods used to generate tables in `json_tables.nr`. These table generation methods shouldn't be used inside of actual circuits.
-use crate::enums::CaptureMode::STRING_CAPTURE;
+use crate::enums::CaptureMode::{CAPTURE_TABLE_HALF, NUM_CAPTURE_MODES, STRING_CAPTURE};
 use crate::enums::Layer::{ARRAY_LAYER, OBJECT_LAYER};
 use crate::enums::Token::{
     BEGIN_ARRAY_TOKEN, BEGIN_OBJECT_TOKEN, END_ARRAY_TOKEN, END_OBJECT_TOKEN, KEY_SEPARATOR_TOKEN,
@@ -14,7 +14,8 @@ use crate::json_tables::TOKEN_VALIDATION_TABLE;
 use crate::token_flags::TokenFlags;
 use crate::transcript_entry::ValidationFlags;
 use super::make_tables_subtables::{
-    GRAMMAR_CAPTURE_ERROR_FLAG, GRAMMAR_CAPTURE_INCREASE_LENGTH, GRAMMAR_CAPTURE_PUSH_TRANSCRIPT,
+    extra_numeric_capture_rows, GRAMMAR_CAPTURE_ERROR_FLAG, GRAMMAR_CAPTURE_INCREASE_LENGTH,
+    GRAMMAR_CAPTURE_PUSH_TRANSCRIPT,
     GRAMMAR_CAPTURE_TABLE, GRAMMAR_CAPTURE_TOKEN, LITERAL_CAPTURE_ERROR_FLAG,
     LITERAL_CAPTURE_INCREASE_LENGTH, LITERAL_CAPTURE_PUSH_TRANSCRIPT, LITERAL_CAPTURE_TABLE,
     LITERAL_CAPTURE_TOKEN, NUMERIC_CAPTURE_ERROR_FLAG, NUMERIC_CAPTURE_INCREASE_LENGTH,
@@ -23,34 +24,81 @@ use super::make_tables_subtables::{
     STRING_CAPTURE_TABLE, STRING_CAPTURE_TOKEN, TOKEN_IS_NUMERIC_OR_LITERAL,
 };
 
-global CAPTURE_TABLE: [[Field; 128]; 4] =
-    [GRAMMAR_CAPTURE_TABLE, STRING_CAPTURE_TABLE, NUMERIC_CAPTURE_TABLE, LITERAL_CAPTURE_TABLE];
-global CAPTURE_TOKEN: [[u32; 128]; 4] =
-    [GRAMMAR_CAPTURE_TOKEN, STRING_CAPTURE_TOKEN, NUMERIC_CAPTURE_TOKEN, LITERAL_CAPTURE_TOKEN];
-global CAPTURE_PUSH_TRANSCRIPT: [[bool; 128]; 4] = [
-    GRAMMAR_CAPTURE_PUSH_TRANSCRIPT,
-    STRING_CAPTURE_PUSH_TRANSCRIPT,
-    NUMERIC_CAPTURE_PUSH_TRANSCRIPT,
-    LITERAL_CAPTURE_PUSH_TRANSCRIPT,
-];
-global CAPTURE_INCREASE_LENGTH: [[bool; 128]; 4] = [
-    GRAMMAR_CAPTURE_INCREASE_LENGTH,
-    STRING_CAPTURE_INCREASE_LENGTH,
-    NUMERIC_CAPTURE_INCREASE_LENGTH,
-    LITERAL_CAPTURE_INCREASE_LENGTH,
-];
-global CAPTURE_ERROR_FLAG: [[bool; 128]; 4] = [
-    GRAMMAR_CAPTURE_ERROR_FLAG,
-    STRING_CAPTURE_ERROR_FLAG,
-    NUMERIC_CAPTURE_ERROR_FLAG,
-    LITERAL_CAPTURE_ERROR_FLAG,
-];
+/// The five parallel sub-tables, one row per scan mode, in `CaptureMode` order.
+///
+/// This used to be five `global`s of four rows each. The four
+/// extra numeric modes are computed rather than written out (see
+/// `extra_numeric_capture_rows`), so the rows are assembled here instead.
+struct CaptureSubTables {
+    capture: [[Field; 128]; NUM_CAPTURE_MODES],
+    token: [[u32; 128]; NUM_CAPTURE_MODES],
+    push_transcript: [[bool; 128]; NUM_CAPTURE_MODES],
+    increase_length: [[bool; 128]; NUM_CAPTURE_MODES],
+    error_flag: [[bool; 128]; NUM_CAPTURE_MODES],
+}
 
-unconstrained fn make_ascii_to_token_table() -> [Field; 1024] {
-    let mut result: [Field; 256 * 4] = [0; 256 * 4];
-    for i in 0..4 {
+unconstrained fn capture_sub_tables() -> CaptureSubTables {
+    let n = extra_numeric_capture_rows();
+    CaptureSubTables {
+        capture: [
+            GRAMMAR_CAPTURE_TABLE,
+            STRING_CAPTURE_TABLE,
+            NUMERIC_CAPTURE_TABLE,
+            LITERAL_CAPTURE_TABLE,
+            n[0].capture,
+            n[1].capture,
+            n[2].capture,
+            n[3].capture,
+        ],
+        token: [
+            GRAMMAR_CAPTURE_TOKEN,
+            STRING_CAPTURE_TOKEN,
+            NUMERIC_CAPTURE_TOKEN,
+            LITERAL_CAPTURE_TOKEN,
+            n[0].token,
+            n[1].token,
+            n[2].token,
+            n[3].token,
+        ],
+        push_transcript: [
+            GRAMMAR_CAPTURE_PUSH_TRANSCRIPT,
+            STRING_CAPTURE_PUSH_TRANSCRIPT,
+            NUMERIC_CAPTURE_PUSH_TRANSCRIPT,
+            LITERAL_CAPTURE_PUSH_TRANSCRIPT,
+            n[0].push_transcript,
+            n[1].push_transcript,
+            n[2].push_transcript,
+            n[3].push_transcript,
+        ],
+        increase_length: [
+            GRAMMAR_CAPTURE_INCREASE_LENGTH,
+            STRING_CAPTURE_INCREASE_LENGTH,
+            NUMERIC_CAPTURE_INCREASE_LENGTH,
+            LITERAL_CAPTURE_INCREASE_LENGTH,
+            n[0].increase_length,
+            n[1].increase_length,
+            n[2].increase_length,
+            n[3].increase_length,
+        ],
+        error_flag: [
+            GRAMMAR_CAPTURE_ERROR_FLAG,
+            STRING_CAPTURE_ERROR_FLAG,
+            NUMERIC_CAPTURE_ERROR_FLAG,
+            LITERAL_CAPTURE_ERROR_FLAG,
+            n[0].error_flag,
+            n[1].error_flag,
+            n[2].error_flag,
+            n[3].error_flag,
+        ],
+    }
+}
+
+unconstrained fn make_ascii_to_token_table() -> [Field; CAPTURE_TABLE_HALF] {
+    let sub = capture_sub_tables();
+    let mut result: [Field; CAPTURE_TABLE_HALF] = [0; CAPTURE_TABLE_HALF];
+    for i in 0..NUM_CAPTURE_MODES {
         for j in 0..128 {
-            let token = CAPTURE_TOKEN[i][j];
+            let token = sub.token[i][j];
             result[i * 256 + j] = token as Field;
         }
         for j in 0..128 {
@@ -273,17 +321,18 @@ unconstrained fn make_token_validation_table() -> [Field; NUM_TOKENS * NUM_TOKEN
     flattened_flags
 }
 
-unconstrained fn make_json_capture_table() -> [Field; 2048] {
+unconstrained fn make_json_capture_table() -> [Field; CAPTURE_TABLE_HALF * 2] {
+    let sub = capture_sub_tables();
     let backslash: u32 = "\\".as_bytes()[0] as u32;
     let quotes: u32 = "\"".as_bytes()[0] as u32;
-    let mut result: [Field; 2048] = [0; 2048];
+    let mut result: [Field; CAPTURE_TABLE_HALF * 2] = [0; CAPTURE_TABLE_HALF * 2];
     for previous_was_potential_capture_escape in 0..2 {
-        for i in 0..4 {
+        for i in 0..NUM_CAPTURE_MODES {
             for j in 0..128 {
-                let mut scan_token = CAPTURE_TABLE[i][j];
-                let mut push_transcript = CAPTURE_PUSH_TRANSCRIPT[i][j] as Field;
-                let mut increase_length = CAPTURE_INCREASE_LENGTH[i][j] as Field;
-                let mut error = CAPTURE_ERROR_FLAG[i][j] as Field;
+                let mut scan_token = sub.capture[i][j];
+                let mut push_transcript = sub.push_transcript[i][j] as Field;
+                let mut increase_length = sub.increase_length[i][j] as Field;
+                let mut error = sub.error_flag[i][j] as Field;
 
                 let mut is_potential_capture_escape = 0;
                 if (scan_token == STRING_CAPTURE) & (j == backslash) {
@@ -300,11 +349,13 @@ unconstrained fn make_json_capture_table() -> [Field; 2048] {
                     + increase_length * 0x10000
                     + is_potential_capture_escape * 0x1000000
                     + error * 0x100000000;
-                let index = i * 256 + previous_was_potential_capture_escape * 1024 + j;
+                let index =
+                    i * 256 + previous_was_potential_capture_escape * CAPTURE_TABLE_HALF + j;
                 result[index] = full;
             }
             for j in 0..128 {
-                let index = i * 256 + previous_was_potential_capture_escape * 1024 + j + 128;
+                let index =
+                    i * 256 + previous_was_potential_capture_escape * CAPTURE_TABLE_HALF + j + 128;
                 result[index] = 0x100000000; // error flag
             }
         }
@@ -313,11 +364,12 @@ unconstrained fn make_json_capture_table() -> [Field; 2048] {
     result
 }
 
-unconstrained fn make_process_raw_transcript_table() -> [Field; 1024] {
-    let mut result: [Field; 1024] = [0; 1024];
-    for i in 0..4 {
+unconstrained fn make_process_raw_transcript_table() -> [Field; CAPTURE_TABLE_HALF] {
+    let sub = capture_sub_tables();
+    let mut result: [Field; CAPTURE_TABLE_HALF] = [0; CAPTURE_TABLE_HALF];
+    for i in 0..NUM_CAPTURE_MODES {
         for j in 0..128 {
-            let token = CAPTURE_TOKEN[i][j];
+            let token = sub.token[i][j];
             let token_is_numeric_or_literal = TOKEN_IS_NUMERIC_OR_LITERAL[token];
             let new_grammar = GRAMMAR_CAPTURE_PUSH_TRANSCRIPT[j] as Field;
             let scan_token = GRAMMAR_CAPTURE_TOKEN[j];
@@ -501,5 +553,78 @@ fn test_make_process_raw_transcript_table() {
     unsafe {
         let r = make_process_raw_transcript_table();
         assert(r == PROCESS_RAW_TRANSCRIPT_TABLE);
+    }
+}
+
+// Emitters for the generated tables in `src/json_tables.nr`.
+//
+// The `test_make*` tests above only *verify* that the committed tables still
+// match the sub-tables; the original implementation has no way of *printing* a new table after the
+// sub-tables change. These tests do. The regeneration cycle is:
+//
+//   nargo test --show-output emit_table_ | grep '^EMIT ' > /tmp/tables.txt
+//   python3 <splicer> /tmp/tables.txt src/json_tables.nr
+//   nargo test test_make        # the verifiers become the regression check
+//
+// `json_tables.nr` is generated: never hand-edit it.
+//
+// A format string cannot index an array, hence the temporary `v`.
+#[test]
+fn emit_table_json_capture() {
+    // Safety: test code
+    unsafe {
+        let r = make_json_capture_table();
+        for i in 0..r.len() {
+            let v = r[i];
+            println(f"EMIT JSON_CAPTURE_TABLE {i} {v}");
+        }
+    }
+}
+
+#[test]
+fn emit_table_ascii_to_token() {
+    // Safety: test code
+    unsafe {
+        let r = make_ascii_to_token_table();
+        for i in 0..r.len() {
+            let v = r[i];
+            println(f"EMIT ASCII_TO_TOKEN_TABLE {i} {v}");
+        }
+    }
+}
+
+#[test]
+fn emit_table_process_raw_transcript() {
+    // Safety: test code
+    unsafe {
+        let r = make_process_raw_transcript_table();
+        for i in 0..r.len() {
+            let v = r[i];
+            println(f"EMIT PROCESS_RAW_TRANSCRIPT_TABLE {i} {v}");
+        }
+    }
+}
+
+#[test]
+fn emit_table_token_validation() {
+    // Safety: test code
+    unsafe {
+        let r = make_token_validation_table();
+        for i in 0..r.len() {
+            let v = r[i];
+            println(f"EMIT TOKEN_VALIDATION_TABLE {i} {v}");
+        }
+    }
+}
+
+#[test]
+fn emit_table_token_flags() {
+    // Safety: test code
+    unsafe {
+        let r = generate_token_flags_table();
+        for i in 0..r.len() {
+            let v = r[i];
+            println(f"EMIT TOKEN_FLAGS_TABLE {i} {v}");
+        }
     }
 }
