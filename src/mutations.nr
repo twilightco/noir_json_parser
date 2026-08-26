@@ -438,3 +438,108 @@ fn unescape_leaves_a_unicode_escape_alone() {
     assert_eq(v.get(0), 92);
     assert_eq(v.get(1), 117); // "u"
 }
+
+// ---------------------------------------------------------------------------------
+// the shuffle argument
+// ---------------------------------------------------------------------------------
+//
+// `noir_sort::sort_advanced` gives "sorted is a permutation of input" by way of
+// `noir_check_shuffle::get_shuffle_indices`, whose whole constrained content is two
+// loops. The hint is internal to that crate, so the lie cannot be told through its API;
+// the two loops are reproduced here instead, exactly as they stand in the pinned
+// version, and lied to directly.
+//
+// Reproduction can drift from the original. Two things bound that risk: the dependency
+// is pinned by tag in `Nargo.toml`, and `sort_advanced_really_permutes` below exercises
+// the real code path on a real record, so a change in the dependency that broke the
+// property would fail there even if this reproduction went stale.
+
+/// `get_shuffle_indices`, with the permutation and its inverse supplied rather than
+/// hinted. `inverse` stands in for the crate's `__get_index`.
+fn shuffle_check_with_forced_indices<let N: u32>(
+    lhs: [Field; N],
+    rhs: [Field; N],
+    shuffle_indices: [u32; N],
+    inverse: [u32; N],
+) {
+    // every index in [0, N) is in the image of `shuffle_indices`...
+    for i in 0..N {
+        assert_eq(shuffle_indices[inverse[i]], i);
+    }
+    // ...and `rhs` is `lhs` under it
+    for i in 0..N {
+        assert_eq(rhs[shuffle_indices[i]], lhs[i]);
+    }
+}
+
+#[test]
+fn shuffle_accepts_an_honest_permutation() {
+    let lhs: [Field; 4] = [10, 20, 30, 40];
+    let rhs: [Field; 4] = [30, 10, 40, 20];
+    // lhs[0] -> rhs[1], lhs[1] -> rhs[3], lhs[2] -> rhs[0], lhs[3] -> rhs[2]
+    shuffle_check_with_forced_indices(lhs, rhs, [1, 3, 0, 2], [2, 0, 3, 1]);
+}
+
+/// The lie that matters: an index array that is not injective. Two inputs claim the same
+/// output slot, which leaves one slot unclaimed -- so a value can be dropped and another
+/// duplicated, and `key_hashes` stops being a permutation of the real hashes. The first
+/// loop catches it because the unclaimed index has no preimage to witness.
+#[test(should_fail)]
+fn mutate_shuffle_with_a_non_injective_index_array_is_rejected() {
+    let lhs: [Field; 4] = [10, 20, 30, 40];
+    let rhs: [Field; 4] = [10, 10, 30, 40];
+    // slot 1 is claimed twice, slot 3 never
+    shuffle_check_with_forced_indices(lhs, rhs, [0, 1, 2, 1], [0, 1, 2, 3]);
+}
+
+/// The same, with the inverse chosen to try to cover the gap. There is no choice that
+/// works: `inverse[3]` must point at a slot holding 3, and none does.
+#[test(should_fail)]
+fn mutate_shuffle_cannot_be_rescued_by_a_different_inverse() {
+    let lhs: [Field; 4] = [10, 20, 30, 40];
+    let rhs: [Field; 4] = [10, 10, 30, 40];
+    shuffle_check_with_forced_indices(lhs, rhs, [0, 1, 2, 1], [0, 3, 2, 0]);
+}
+
+/// A genuine permutation, but `rhs` is not `lhs` under it: the second loop catches it.
+#[test(should_fail)]
+fn mutate_shuffle_with_a_value_swapped_is_rejected() {
+    let lhs: [Field; 4] = [10, 20, 30, 40];
+    let rhs: [Field; 4] = [30, 10, 40, 99]; // 20 became 99
+    shuffle_check_with_forced_indices(lhs, rhs, [1, 3, 0, 2], [2, 0, 3, 1]);
+}
+
+/// An out-of-range index is a failed bounds check, not a wrap.
+#[test(should_fail)]
+fn mutate_shuffle_with_an_out_of_range_index_is_rejected() {
+    let lhs: [Field; 4] = [10, 20, 30, 40];
+    let rhs: [Field; 4] = [30, 10, 40, 20];
+    shuffle_check_with_forced_indices(lhs, rhs, [1, 3, 0, 4], [2, 0, 3, 1]);
+}
+
+/// The real path, on a real record: whatever `sort_advanced` returned, it is sorted and
+/// it holds exactly the multiset the parser put in. Checked by counting each input value
+/// in the output, which needs no hint of its own.
+#[test]
+fn sort_advanced_really_permutes() {
+    let json = record();
+    let sorted = json.key_hashes;
+    let unsorted = json.compute_key_hashlist();
+
+    for i in 1..17 {
+        let a = sorted[i - 1];
+        let b = sorted[i];
+        // sorted, and inside the range that makes the comparator mean what it says
+        assert(crate::_comparison_tools::lt::lte_field_240_bit(a, b), "not sorted");
+    }
+
+    for i in 0..17 {
+        let mut in_sorted: Field = 0;
+        let mut in_unsorted: Field = 0;
+        for j in 0..17 {
+            in_sorted += (sorted[j] == unsorted[i]) as Field;
+            in_unsorted += (unsorted[j] == unsorted[i]) as Field;
+        }
+        assert(in_sorted == in_unsorted, "multiset changed across the sort");
+    }
+}

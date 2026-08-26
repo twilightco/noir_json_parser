@@ -49,7 +49,12 @@ impl KeyIndexData {
 }
 
 impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let MaxNumValues: u32, let MaxKeyFields: u32> JSON<NumBytes, NumPackedFields, MaxNumTokens, MaxNumValues, MaxKeyFields> {
-    pub(crate) fn compute_keyhash_and_sort_json_entries(&mut self) {
+    /// The list the sort is applied to, before it is sorted.
+    ///
+    /// Split out of `compute_keyhash_and_sort_json_entries` so that a test can ask what
+    /// went *into* the sort and compare it with what came out; the parser itself calls
+    /// it exactly once, in the line below.
+    pub(crate) fn compute_key_hashlist(self) -> [Field; MaxNumValues] {
         let hasher: FieldHasher<MaxKeyFields> = FieldHasher {};
 
         let mut hashlist: [Field; MaxNumValues] = [0; MaxNumValues];
@@ -65,6 +70,12 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         }
 
         hashlist[MaxNumValues - 1] = 0; // we always ensure the last (unused hopefully!) entry goes first.
+        hashlist
+    }
+
+    pub(crate) fn compute_keyhash_and_sort_json_entries(&mut self) {
+        let mut hashlist: [Field; MaxNumValues] = self.compute_key_hashlist();
+
         self.json_entries_packed[MaxNumValues - 1] = JSONEntryPacked::default();
         // when updating identity_to_json_map we are relying on the fact that we can update sorted entry 0? maybe? oof document better
         let sort_result = noir_sort::sort_advanced(hashlist, lte_field_240_bit, assert_lte_240_bit);
