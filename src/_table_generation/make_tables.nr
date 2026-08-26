@@ -353,10 +353,34 @@ unconstrained fn make_json_capture_table() -> [Field; CAPTURE_TABLE_HALF * 2] {
                     i * 256 + previous_was_potential_capture_escape * CAPTURE_TABLE_HALF + j;
                 result[index] = full;
             }
+            // bytes 0x80..0xFF
+            //
+            // The original implementation makes every one of them an error in every
+            // mode, which is why a single accented letter anywhere in a document
+            // makes the whole document unparseable. RFC 8259 allows any Unicode
+            // scalar value inside a string, and a key *is* a string, so inside
+            // `STRING_CAPTURE` they are ordinary string content (same encoding as
+            // any other content byte: stay in the mode, extend the token, do not
+            // push, no error). Outside a string they stay an error: no JSON token
+            // starts with a high byte.
+            //
+            // This is byte transparency, NOT UTF-8 validation: an overlong
+            // encoding, a truncated sequence or a lone continuation byte all get
+            // through, and `get_string` hands back the raw bytes. Validating
+            // well-formedness needs the *sequence* state (how many continuation
+            // bytes are still owed, and which ranges are legal for the leader),
+            // i.e. three or four more capture modes on top of the eight, plus a
+            // rule that a string cannot close mid-sequence. It is not something
+            // this table can express as it stands.
             for j in 0..128 {
                 let index =
                     i * 256 + previous_was_potential_capture_escape * CAPTURE_TABLE_HALF + j + 128;
-                result[index] = 0x100000000; // error flag
+                if i as Field == STRING_CAPTURE {
+                    // scan_token = STRING_CAPTURE, push = 0, increase_length = 1
+                    result[index] = STRING_CAPTURE + 0x10000;
+                } else {
+                    result[index] = 0x100000000; // error flag
+                }
             }
         }
     }

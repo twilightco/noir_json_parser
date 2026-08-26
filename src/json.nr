@@ -1382,3 +1382,67 @@ fn number_rejects_a_dot_after_a_minus() {
 fn number_rejects_a_number_followed_by_a_key_separator() {
     let _: NumberJson = JSON::parse_json_from_string("{\"a\":1:2}");
 }
+
+// ============================================================================
+// Non-ASCII bytes inside strings and keys are preserved opaquely.
+// ============================================================================
+//
+// Byte transparency, not UTF-8 validation: 0x80..0xFF are string content and
+// come back out of `get_string` exactly as they went in. A malformed sequence
+// is NOT rejected -- see the note in `make_json_capture_table`.
+
+type Utf8Json = JSON<24, 4, 16, 9, 2>;
+
+global UTF8_EACUTE: [u8; 13] = [123, 34, 97, 34, 58, 34, 99, 97, 102, 195, 169, 34, 125];
+global UTF8_JAPANESE: [u8; 14] =
+    [123, 34, 97, 34, 58, 34, 230, 151, 165, 230, 156, 172, 34, 125];
+global UTF8_EMOJI: [u8; 12] = [123, 34, 97, 34, 58, 34, 240, 159, 152, 128, 34, 125];
+global UTF8_KEY: [u8; 12] = [123, 34, 99, 105, 116, 116, 195, 160, 34, 58, 49, 125];
+global UTF8_LONE_HIGH_BYTE_IN_STRING: [u8; 9] = [123, 34, 97, 34, 58, 34, 255, 34, 125];
+global UTF8_HIGH_BYTE_OUTSIDE_STRING: [u8; 7] = [123, 34, 97, 34, 58, 128, 125];
+
+fn utf8_string_bytes_are<let N: u32>(json: Utf8Json, expected: [u8; N]) {
+    let s: BoundedVec<u8, 16> = json.get_string("a".as_bytes()).unwrap();
+    assert(s.len() == N, "utf8: wrong length");
+    for i in 0..N {
+        assert(s.get(i) == expected[i], "utf8: wrong byte");
+    }
+}
+
+#[test]
+fn utf8_two_byte_sequence_in_a_value() {
+    let json = Utf8Json::parse_json(UTF8_EACUTE);
+    utf8_string_bytes_are(json, [99, 97, 102, 195, 169]); // caf<c3><a9>
+}
+
+#[test]
+fn utf8_three_byte_sequences_in_a_value() {
+    let json = Utf8Json::parse_json(UTF8_JAPANESE);
+    utf8_string_bytes_are(json, [230, 151, 165, 230, 156, 172]);
+}
+
+#[test]
+fn utf8_four_byte_sequence_in_a_value() {
+    let json = Utf8Json::parse_json(UTF8_EMOJI);
+    utf8_string_bytes_are(json, [240, 159, 152, 128]);
+}
+
+#[test]
+fn utf8_in_a_key() {
+    let json = Utf8Json::parse_json(UTF8_KEY);
+    // key "citt<c3><a0>", looked up by its raw bytes
+    let key: [u8; 6] = [99, 105, 116, 116, 195, 160];
+    assert(json.get_number_unchecked(key) == 1);
+}
+
+/// Documents the limit: this is not valid UTF-8 and it parses anyway.
+#[test]
+fn utf8_a_lone_high_byte_inside_a_string_is_accepted_unvalidated() {
+    let json = Utf8Json::parse_json(UTF8_LONE_HIGH_BYTE_IN_STRING);
+    utf8_string_bytes_are(json, [255]);
+}
+
+#[test(should_fail_with = "ScanData: Invalid token")]
+fn utf8_a_high_byte_outside_a_string_still_fails() {
+    let _ = Utf8Json::parse_json(UTF8_HIGH_BYTE_OUTSIDE_STRING);
+}
