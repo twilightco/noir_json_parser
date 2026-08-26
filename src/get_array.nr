@@ -32,11 +32,35 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         K: KeyHashable,
     {
         let (exists, entry, key_index) = self.get_json_entry(key);
-        if !exists {
+        /*
+            [soundness fix] the condition was inverted: `if !exists`. Compare with
+            `get_object` a few files over, which has `if exists`. Two consequences, both
+            observed:
+
+              * key present, wrong type -> NO check at all. `update_json_array` below
+                then stamps `layer_type_of_root = ARRAY_LAYER` unconditionally, so even
+                the guard in `get_length` passes and returns the `num_children` of an
+                entry that is not an array. On `{"entities":""}` this makes
+                `get_array("entities").unwrap().get_length()` return 0: a predicate
+                "this array is empty" is satisfied by an empty *string*, and equally by
+                a number or an object. That is the soundness hole.
+              * key absent -> the type of a phantom entry (the one sitting at the
+                not-found witness index) gets asserted. Whether that assert fires is a
+                coin flip depending on which entry the index lands on, so the documented
+                contract "returns none if the key does not exist" does not hold either:
+                on `{"a":1}` the call reverts instead of returning `none`.
+
+            With `if exists` the type is checked exactly when there is something to
+            check, `Option::none()` is reachable again, and the unconditional
+            `ARRAY_LAYER` in `update_json_array` becomes harmless: the only way to get
+            the `JSON` back out is through the `Some` branch, which is now gated on the
+            entry really being an array. This mirrors `get_object` exactly.
+        */
+        if exists {
             assert_eq(
                 entry.entry_type,
                 END_ARRAY_TOKEN as Field,
-                "key does not describe an object",
+                "get_array: entry exists but is not an array!",
             );
         }
 
@@ -59,7 +83,10 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
         assert(self.layer_type_of_root != ARRAY_LAYER, "cannot extract array elements via a key");
 
         let (entry, key_index) = self.get_json_entry_unchecked_with_key_index(key);
-        assert(entry.entry_type == END_ARRAY_TOKEN as Field, "key does not describe an object");
+        assert(
+            entry.entry_type == END_ARRAY_TOKEN as Field,
+            "get_array_unchecked: entry exists but is not an array!",
+        );
 
         self.update_json_array(entry, key_index)
     }

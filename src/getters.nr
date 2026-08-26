@@ -1,3 +1,4 @@
+use crate::_comparison_tools::bounds_checker::get_validity_flags;
 use crate::_comparison_tools::lt::{assert_gt_240_bit, assert_lt_240_bit, lt_field_16_bit};
 use crate::_string_tools::string_chopper::slice_string;
 use crate::enums::Layer::ARRAY_LAYER;
@@ -156,6 +157,80 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             found + (target_gt_largest_entry as Field) + (target_lt_smallest_entry as Field);
         exclusion_test.assert_max_bit_size::<1>();
 
+        /*
+            [soundness fix] bind the not-found witness to the sorted list.
+
+            INVARIANT USED. `self.key_hashes` is sorted non-decreasing:
+                key_hashes[i] <= key_hashes[i + 1]  for every i in 0..MaxNumValues - 1.
+            This is established in `keymap.nr:compute_keyhash_and_sort_json_entries`,
+            which builds `hashlist` and sorts it with `noir_sort::sort_advanced`. The
+            constrained part of that call proves (a) that `sorted` is a permutation of
+            `hashlist` (`get_shuffle_indices`, proved in both directions) and (b) the
+            chain `assert_lte_240_bit(sorted[i], sorted[i + 1])` over every adjacent
+            pair. Every entry of `hashlist` is a 200-bit key hash plus a 16-bit
+            `array_index` at 2^200 plus a 16-bit `parent_id` at 2^216, all range
+            checked (`slice_200_bits_from_field`, `KeyIndexData::from_field`), hence
+            < 2^232: the 240-bit comparison cannot wrap and really orders the list.
+            The same bound holds for `keyhash` below (200-bit hash + 16-bit `root_id`
+            at 2^216), so all the comparisons in this function are over integers.
+
+            NON-MEMBERSHIP. On a sorted list, "keyhash is not in key_hashes" is proved
+            by exactly one of three witnesses:
+              (a) keyhash < key_hashes[0]                    -> below every entry;
+              (b) key_hashes[MaxNumValues - 1] < keyhash     -> above every entry;
+              (c) key_hashes[j] < keyhash < key_hashes[j+1]  -> strictly between two
+                                                                *adjacent* entries.
+            The `assert_gt_240_bit` / `assert_lt_240_bit` pair further down proves the
+            inequalities; the missing piece was binding the *indices*.
+            Without it (c) degenerates into "between two arbitrary entries", which a
+            key that is actually present can simply be jumped over, and (b) is a free
+            pass: `target_gt_largest_entry` hands out rhs = HASH_MAXIMUM without ever
+            being compared to the last entry. The three asserts below are the missing
+            binding:
+              (a) target_lt_smallest_entry => rhs_index == 0
+              (b) target_gt_largest_entry  => lhs_index == MaxNumValues - 1
+              (c) none of the three flags  => rhs_index == lhs_index + 1
+            `middle` is boolean because `exclusion_test` is range checked to 1 bit.
+
+            PADDING. Unused slots of `key_data` hold 0, so they all hash to the *same*
+            constant (Poseidon of an empty key, array_index 0, parent_id 0), and
+            `keymap.nr:67` additionally forces one entry to 0. The sorted list is
+            therefore `0`, then a run of equal padding entries, then the real keys:
+            the smallest real key is *not* at index 0, and equal adjacent entries are
+            the norm rather than the exception. Two consequences:
+              * case (c) has to mean "adjacent in `key_hashes`", not "adjacent among
+                real keys" -- which it does, and the honest hint was taught to return
+                the *last* index of the largest entry below the target so that the two
+                indices really are consecutive (see `search_for_key_in_map`);
+              * anchoring (a) to index 0 costs an honest prover nothing: key_hashes[0]
+                is the forced 0 and every real target is >= 2^216 (root_id >= 1), so
+                branch (a) is never taken honestly, and a malicious prover taking it
+                must prove `keyhash < 0`, which is unsatisfiable.
+            Padding entries are all < 2^216 (parent_id == 0), so they can never be hit
+            by a lookup and their duplication is harmless here.
+
+            DEPTH. `get_object` / `get_array` only change `self.root_id`, and the
+            target is `key_hash + root_id * 2^216`: keys of every object in the record
+            live in the same sorted list, grouped by `parent_id` in the high bits.
+            Proving non-membership in the whole list implies non-membership in the
+            group, so the argument holds at every depth.
+        */
+        let middle = 1 - exclusion_test;
+        let lhs_index_f = search_result.lhs_index as Field;
+        let rhs_index_f = search_result.rhs_index as Field;
+        assert(
+            middle * (rhs_index_f - lhs_index_f - 1) == 0,
+            "key_exists: not-found witness entries are not adjacent",
+        );
+        assert(
+            (target_lt_smallest_entry as Field) * rhs_index_f == 0,
+            "key_exists: target_lt_smallest_entry must point at index 0",
+        );
+        assert(
+            (target_gt_largest_entry as Field) * (lhs_index_f - (MaxNumValues as Field - 1)) == 0,
+            "key_exists: target_gt_largest_entry must point at the last index",
+        );
+
         // case where hash < self.key_hashes[0]
         // 0 < hash < hashes[0]
         let lhs = self.key_hashes[search_result.lhs_index];
@@ -197,11 +272,65 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
 
         assert(key_indices.len() as Field == root_object.num_children);
 
+        /*
+            The original implementation constrained only the *number* of indices returned
+            by `__get_keys_at_root`, never which slots they point at, so the prover was
+            free to return `num_children` copies of a single index, or indices of keys
+            belonging to nested objects. Two constraints pin the set exactly:
+
+              1. every returned slot is a direct child of the current root, i.e.
+                 `key_data[idx].parent_id == self.root_id`. `KeyIndexData.parent_id` is
+                 the identity of the enclosing object/array, the same value that ends
+                 up in `JSONEntry.parent_index` for the same slot (`json.nr` writes
+                 both from `current_identity_value`), and it is the field that
+                 `keymap.nr` folds into the key hash at 2^216 -- the very thing a key
+                 lookup matches against. `self.root_id` is >= 1 (1 for the document
+                 root, the object's identity after `get_object`), while unused slots of
+                 `key_data` are 0 and so carry `parent_id == 0`: the check also rules
+                 out padding slots.
+
+              2. the indices strictly increase, hence are pairwise distinct. The honest
+                 hint scans `unsorted_json_entries_packed` from 0 upwards and appends,
+                 so it already returns them sorted; requiring a strictly increasing
+                 index is the cheapest way to constrain that, and as a bonus it pins
+                 the result to document order.
+
+            Together with the pre-existing length check, `num_children` distinct slots
+            all having `parent_id == root_id` is exactly the set of the root's children,
+            since that set has `num_children` elements.
+
+            Both checks are masked by `valid[i] = i < key_indices.len()`: the loop runs
+            over all `MaxNumKeys` slots, and the entries past the length are padding
+            that `BoundedVec::from_parts_unchecked` discards. `valid` is monotone
+            (1 ... 1 0 ... 0) by construction, so once the mask is 0 it stays 0 and
+            `previous_index` can be left to drift. Note the flags array is one element
+            longer than the loop: `get_validity_flags` rejects `boundary == N`, and
+            `key_indices.len()` may legitimately equal `MaxNumKeys`.
+        */
+        let valid: [u32; MaxNumKeys + 1] = get_validity_flags(key_indices.len());
+        let mut previous_index: Field = 0;
+
         let mut result: [BoundedVec<u8, MaxKeyBytes>; MaxNumKeys] = [BoundedVec::new(); MaxNumKeys];
         for i in 0..MaxNumKeys {
-            let key = KeyIndexData::from_field(
-                self.key_data[cast_num_to_u32(key_indices.get_unchecked(i))],
+            let raw_index = key_indices.get_unchecked(i);
+            let is_valid = valid[i] as Field;
+            let key = KeyIndexData::from_field(self.key_data[cast_num_to_u32(raw_index)]);
+
+            assert(
+                (key.parent_id - self.root_id) * is_valid == 0,
+                "get_keys_at_root: returned key does not belong to the root object",
             );
+            // `i != 0` is a comptime loop index, so the branch itself costs nothing:
+            // the first slot simply has no predecessor to compare against.
+            if i != 0 {
+                let increasing = lt_field_16_bit(previous_index, raw_index);
+                assert(
+                    (1 - increasing as Field) * is_valid == 0,
+                    "get_keys_at_root: returned indices are not strictly increasing",
+                );
+            }
+            previous_index = raw_index;
+
             // just a workaround to the interface for `extract_string_entry`
             let mut fake_entry = JSONEntry::new();
             fake_entry.json_pointer = key.json_index;
@@ -212,6 +341,69 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             );
         }
         BoundedVec::from_parts(result, key_indices.len())
+    }
+
+    /*
+        [soundness fix] Asserts that the record contains no duplicate key, i.e. that no
+        two entries of the same object carry the same key.
+
+        This does *not* fix a hole in the lookup: with `{"a":1,"a":2}` both occurrences
+        satisfy `key_hashes[i] == keyhash`, so which one `get_number("a")` returns is
+        the prover's choice, and no local constraint can decide between two equal
+        entries. The fix is to reject such records outright, which is also what the
+        JSON semantics where a key means one value requires. Call it
+        once per record, before reading anything out of it.
+
+        How it works. `self.key_hashes` is sorted (see `key_exists_impl` for why that is
+        constrained), so duplicates are adjacent and one pass over the adjacent pairs is
+        enough. The list is not made only of keys, though: it also holds the padding
+        slots (all hashing to the same constant), the forced 0 of `keymap.nr:67` and the
+        record's own root entry. Those all have `parent_id == 0`, hence a value < 2^216,
+        while every real key of every object has `parent_id >= 1`, hence a value
+        >= 2^216. Since the list is sorted, the sub-2^216 entries form a *prefix*, and
+        the check has to skip exactly that prefix -- otherwise the repeated padding
+        would make every honest record fail.
+
+        `num_padding` is a hint: its length is bound by a single comparison,
+        `key_hashes[num_padding - 1] < 2^216`, which by sortedness proves that the whole
+        skipped prefix has `parent_id == 0` and therefore contains no key. A prover
+        cannot enlarge the skipped region to hide a duplicate; shrinking it only adds
+        constraints. `num_padding >= 1` always holds, because `key_hashes[0]` is the
+        forced 0.
+
+        For `i` inside the prefix the mask makes the assert read `diff + 1 != 0`, which
+        is free: `diff >= 0` by sortedness. For `i` past it the assert is `diff != 0`,
+        i.e. strictly increasing, i.e. no duplicate.
+
+        Array elements are not false positives: two elements of the same array share
+        `parent_id` but differ in `array_index` (bits 200..215), so their entries
+        differ. Two members of the same object share `array_index == 0`, so their
+        entries are equal exactly when the key bytes are equal.
+
+        Cost: ~5 gates per `MaxNumValues` slot plus one 240-bit range check.
+    */
+    pub fn assert_no_duplicate_keys(self) {
+        let two_pow_216 = 0x100000000000000000000000000000000000000000000000000000000;
+
+        // Safety: `num_padding` only selects which adjacent pairs are checked. The
+        // assert below pins the skipped prefix to entries with `parent_id == 0`, which
+        // no key lookup can ever target, so a wrong hint cannot hide a duplicate key.
+        let num_padding =
+            unsafe { __count_non_key_entries::<MaxNumValues>(self.key_hashes) };
+        assert(num_padding != 0, "assert_no_duplicate_keys: empty padding prefix");
+        assert_lt_240_bit(self.key_hashes[num_padding - 1], two_pow_216);
+
+        // `valid[j] = j < num_padding - 1`, so `valid[i - 1] = i < num_padding`.
+        // Shifting by one keeps the boundary below the array length even when every
+        // entry is padding (an empty record `{}`), which `get_validity_flags` requires.
+        let valid: [u32; MaxNumValues] = get_validity_flags(num_padding - 1);
+        for i in 1..MaxNumValues {
+            let diff = self.key_hashes[i] - self.key_hashes[i - 1];
+            assert(
+                diff + valid[i - 1] as Field != 0,
+                "assert_no_duplicate_keys: duplicate key in the record",
+            );
+        }
     }
 
     /// Helper function to get an entry from an array at a given index
@@ -286,7 +478,15 @@ unconstrained fn search_for_key_in_map<let MaxNumValues: u32>(
             found = true;
             break;
         } else {
-            if key_hash.lt(target) & (lhs_maximum.lt(key_hash)) {
+            // [soundness fix] `!key_hash.lt(lhs_maximum)` is `lhs_maximum <= key_hash`.
+            // The comparison has to be non-strict so that a repeated entry updates
+            // `lhs_maximum_index` again: we must hand back the *last* index holding
+            // the largest entry below the target, otherwise `lhs_index` and
+            // `rhs_index` are not consecutive whenever that entry is duplicated --
+            // which is the common case, since every unused slot of `key_data` hashes
+            // to the same padding value. `rhs_minimum` stays strict on purpose: it
+            // already yields the *first* index of the smallest entry above the target.
+            if key_hash.lt(target) & !(key_hash.lt(lhs_maximum)) {
                 lhs_maximum = key_hash;
                 lhs_maximum_index = i as Field;
             }
@@ -323,6 +523,22 @@ unconstrained fn search_for_key_in_map<let MaxNumValues: u32>(
         lhs_index: lhs_index as u32,
         rhs_index: rhs_index as u32,
     }
+}
+
+/// counts the leading entries of the sorted `key_hashes` that are *not* keys, i.e.
+/// the ones whose `parent_id` (bits 216..239) is zero: padding slots, the forced zero
+/// entry and the record's own root entry. See `assert_no_duplicate_keys`.
+unconstrained fn __count_non_key_entries<let MaxNumValues: u32>(
+    key_hashes: [Field; MaxNumValues],
+) -> u32 {
+    let two_pow_216 = 0x100000000000000000000000000000000000000000000000000000000;
+    let mut count: u32 = 0;
+    for i in 0..MaxNumValues {
+        if key_hashes[i].lt(two_pow_216) {
+            count += 1;
+        }
+    }
+    count
 }
 
 unconstrained fn __get_keys_at_root<let MaxNumKeys: u32, let MaxNumValues: u32>(
