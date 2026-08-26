@@ -667,7 +667,14 @@ impl<let NumBytes: u32, let NumPackedFields: u32, let MaxNumTokens: u32, let Max
             let entry = TranscriptEntry::to_field(TranscriptEntry { token, index, length });
 
             if token == LITERAL_TOKEN as Field {
-                index.assert_max_bit_size::<8>();
+                // 16 bits, not 8. `index` is the 16-bit index
+                // field of `RawTranscriptEntry` (already range-checked there);
+                // an 8-bit bound here rejected every `true`/`false`/`null` past
+                // byte 255 of the document. The cast below still has to be
+                // range-checked, and the four `self.json[...]` reads that follow
+                // are ROM reads, so an index past the end of the buffer is a
+                // failed constraint, not a wrap.
+                index.assert_max_bit_size::<16>();
                 let index_as_u32 = index as u32;
                 let first_char = self.json[index_as_u32];
                 let second_char = self.json[index_as_u32 + 1];
@@ -878,6 +885,39 @@ unconstrained fn __capture_missing_tokens<let MaxNumTokens: u32>(
         transcript_ptr += (update != 0) as u32;
     }
     updated_transcript
+}
+
+// ============================================================================
+// a literal past byte 255
+// ============================================================================
+//
+// `capture_missing_tokens` re-reads the four/five bytes of every `true`,
+// `false`, `null` to check them, and bounded the byte offset with
+// `index.assert_max_bit_size::<8>()` -- 255. `index` is a 16-bit field of
+// `RawTranscriptEntry` and every other user of it treats it as such, so the
+// `<8>` is simply too tight: ANY document longer than 256 bytes with a boolean
+// or a null after byte 255 fails inside `parse_json`. It has nothing to do with
+// the numeric grammar work; it showed up because `real-elliptic-severe` (651 B, `false`
+// at offset 501) is the first record that got far enough to hit it.
+
+/// `{"pad":"xxx...","b":true}`, 268 bytes, with the `true` starting at byte 263.
+fn literal_past_byte_255_document() -> [u8; 268] {
+    let mut doc: [u8; 268] = [120; 268]; // 'x'
+    let head = "{\"pad\":\"".as_bytes();
+    for i in 0..8 {
+        doc[i] = head[i];
+    }
+    let tail = "\",\"b\":true}".as_bytes();
+    for i in 0..11 {
+        doc[257 + i] = tail[i];
+    }
+    doc
+}
+
+#[test]
+fn literal_literal_past_byte_255_parses() {
+    let json: JSON<268, 12, 32, 17, 2> = JSON::parse_json(literal_past_byte_255_document());
+    assert(json.get_literal_unchecked("b".as_bytes()).is_true());
 }
 
 #[test]
