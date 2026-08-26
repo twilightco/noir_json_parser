@@ -31,30 +31,29 @@ jobs:
         run: nargo test
 
   soundness:
-    name: No unconstrained-value diagnostics
+    name: No missing Brillig constraints
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
 
       - name: Install Nargo
-        uses: noir-lang/noirup@v0.1.3
+        uses: noir-lang/noirup@v0.1.4
         with:
           toolchain: ${{ env.NOIR_VERSION }}
 
-      # `bug:` is the compiler telling us a value returned by an unconstrained function
-      # reaches a constrained context without being checked. The tree is clean of them
-      # and must stay that way: the fix is a constraint, never
-      # `--skip-brillig-constraints-check`.
-      - name: nargo check
-        run: |
-          set -o pipefail
-          nargo check 2>&1 | tee check.log
-          if grep -q '^bug:' check.log; then
-            echo "::error::nargo check reported a bug: diagnostic"
-            grep -A5 '^bug:' check.log
-            exit 1
-          fi
+      # `bug:` is the compiler saying a value from an unconstrained function reaches
+      # constrained code without being pinned to its inputs -- the shape of every
+      # soundness bug this branch fixed. The check is on by default and
+      # `--skip-brillig-constraints-check` must never be used here.
+      #
+      # This job used to grep `nargo check` output for it, which CANNOT WORK: the lint
+      # runs on monomorphised code and a library has nothing to monomorphise. The script
+      # compiles a real bin consumer instead, and then re-compiles it against a copy of
+      # the library carrying a deliberately uncovered call -- if the lint fails to catch
+      # that, the job fails, because a check that cannot fail is worse than no check.
+      - name: Brillig constraint coverage
+        run: ./scripts/brillig-constraints-check.sh
 
   tables:
     name: Lookup tables reproduce from their generators
