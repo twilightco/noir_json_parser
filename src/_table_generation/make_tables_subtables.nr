@@ -2257,6 +2257,9 @@ pub(crate) unconstrained fn escape_capture_rows() -> [CaptureRow; 5] {
 ///   other control byte was already an error here. They were also the only three
 ///   bytes whose `increase_length` disagreed with their `capture`, so a raw tab
 ///   inside a string silently shortened the token it was part of.
+/// * DEL (127) was an error. It is not a control byte as far as RFC 8259 is
+///   concerned -- the forbidden range is 0x00-0x1F and stops well below it -- so
+///   `{"a":"\x7f"}` is valid JSON that would not parse. Found by the corpus.
 pub(crate) unconstrained fn string_capture_row() -> CaptureRow {
     let mut row = CaptureRow {
         capture: STRING_CAPTURE_TABLE,
@@ -2277,6 +2280,13 @@ pub(crate) unconstrained fn string_capture_row() -> CaptureRow {
         row.increase_length[b] = false;
         row.error_flag[b] = true;
     }
+
+    // DEL (127) is ordinary string content, like every other byte from 0x20 up
+    row.capture[127] = STRING_CAPTURE;
+    row.token[127] = NO_TOKEN;
+    row.push_transcript[127] = false;
+    row.increase_length[127] = true;
+    row.error_flag[127] = false;
 
     row
 }
