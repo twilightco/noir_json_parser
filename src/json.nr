@@ -1569,6 +1569,59 @@ fn number_rejects_a_number_followed_by_a_key_separator() {
 // come back out of `get_string` exactly as they went in. A malformed sequence
 // is NOT rejected -- see the note in `make_json_capture_table`.
 
+// ---------------------------------------------------------------------------
+// key length boundary (MaxKeyFields limbs of 31 bytes)
+// ---------------------------------------------------------------------------
+//
+// `MaxKeyFields = 2` buys keys of up to 62 bytes: the hash is taken over exactly
+// `MaxKeyFields` 31-byte limbs. The lookup-side bound in `ByteHasher::get_keyhash_var`
+// read `key_length < KeyFields * 31`, so a 62-byte key parsed happily and then aborted
+// the moment anyone looked it up -- an off-by-one, not a real limit. Both hashers now
+// bound at `<= KeyFields * 31`, and a key past that is rejected during the parse rather
+// than truncated into a collision.
+
+type KeyBoundaryJson = JSON<80, 6, 16, 9, 2>;
+
+#[test]
+fn key_of_61_bytes_round_trips() {
+    let json: KeyBoundaryJson = JSON::parse_json_from_string("{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}");
+    let key = "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk".as_bytes();
+    assert_eq(key.len(), 61);
+    assert(json.get_number_unchecked(key) == 1);
+}
+
+#[test]
+fn key_of_62_bytes_round_trips() {
+    let json: KeyBoundaryJson = JSON::parse_json_from_string("{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}");
+    let key = "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk".as_bytes();
+    assert_eq(key.len(), 62);
+    assert(json.get_number_unchecked(key) == 1);
+}
+
+/// The exact-capacity key must also be distinguishable from every other key of the same
+/// length: truncation would make these two collide.
+#[test]
+fn keys_of_62_bytes_are_not_truncated() {
+    let json: JSON<160, 9, 24, 13, 2> =
+        JSON::parse_json_from_string("{\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA\":1,\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaB\":2}");
+    assert(json.get_number_unchecked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaA".as_bytes()) == 1);
+    assert(json.get_number_unchecked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaB".as_bytes()) == 2);
+}
+
+/// One byte past capacity is rejected by the parse itself, not by the getter.
+#[test(should_fail_with = "key too large")]
+fn key_of_63_bytes_is_rejected_at_parse() {
+    let _: KeyBoundaryJson = JSON::parse_json_from_string("{\"kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk\":1}");
+}
+
+/// ... and a lookup with an over-long key is rejected too, even against a JSON that
+/// contains no such key.
+#[test(should_fail_with = "key too large")]
+fn lookup_with_a_63_byte_key_is_rejected() {
+    let json: KeyBoundaryJson = JSON::parse_json_from_string("{\"a\":1}");
+    let _ = json.get_number("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk".as_bytes());
+}
+
 type Utf8Json = JSON<24, 4, 16, 9, 2>;
 
 global UTF8_EACUTE: [u8; 13] = [123, 34, 97, 34, 58, 34, 99, 97, 102, 195, 169, 34, 125];

@@ -17,6 +17,12 @@ impl<let KeyFields: u32> FieldHasher<KeyFields> {
         body_index: Field,
         key_length: Field,
     ) -> Field {
+        // `slice_fields` writes exactly `KeyFields` limbs whatever `key_length` says, so a
+        // longer key would be silently truncated and two distinct keys could share a hash.
+        // `ByteHasher` (the lookup side) rejects the same length, so both sides agree on
+        // the boundary at `KeyFields * 31`.
+        assert(cast_num_to_u32(key_length) <= KeyFields * 31, "key too large");
+
         let key_fields: [Field; KeyFields] = slice_fields(packed_fields, body_index, key_length);
         let hashed = poseidon::poseidon2::Poseidon2::hash(key_fields, KeyFields);
         slice_200_bits_from_field(hashed)
@@ -39,7 +45,7 @@ impl<let KeyFields: u32> ByteHasher<KeyFields> {
         body_index: u32,
         key_length: u32,
     ) -> Field {
-        assert(key_length < KeyFields * 31, "key too large");
+        assert(key_length <= KeyFields * 31, "key too large");
 
         let mut key_fields: [Field; KeyFields] = [0; KeyFields];
 
