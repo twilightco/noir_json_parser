@@ -82,6 +82,28 @@ jobs:
           python3 scripts/splice_tables.py tables.txt src/json_tables.nr
           git diff --exit-code -- src/json_tables.nr
 
+  corpus:
+    name: Conformance corpus agrees with a reference parser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Nargo
+        uses: noir-lang/noirup@v0.1.4
+        with:
+          toolchain: ${{ env.NOIR_VERSION }}
+
+      # Two claims. The committed baseline must still be what the generator produces --
+      # otherwise a case could be edited into agreement -- and the parser must still
+      # agree with it. A row that changes is a decision somebody has to justify in the
+      # diff, which is the entire point of committing `corpus/cases.json`.
+      - name: Baseline is up to date
+        run: python3 corpus/generate.py --check
+
+      - name: Parser agrees with the corpus
+        run: nargo test conformance::
+
   format:
     runs-on: ubuntu-latest
     steps:
@@ -107,6 +129,7 @@ jobs:
       - format
       - soundness
       - tables
+      - corpus
 
     steps:
       - name: Report overall success
