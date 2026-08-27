@@ -101,7 +101,7 @@ jobs:
         run: python3 corpus/generate.py --check
 
       - name: Parser agrees with the corpus
-        run: nargo test conformance::
+        run: "nargo test conformance::"
 
   format:
     runs-on: ubuntu-latest
