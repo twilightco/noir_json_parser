@@ -16,7 +16,11 @@ env:
 
 jobs:
   test:
-    name: Test on Nargo ${{ env.NOIR_VERSION }}
+    # A job `name:` cannot read `env` -- GitHub allows only github, inputs, matrix,
+    # needs, strategy and vars there, and rejects the whole *file* over it, which
+    # takes down every job in it. Hardcoding the version here instead would drift
+    # from NOIR_VERSION above; it is on show in the Install Nargo step either way.
+    name: Nargo tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
